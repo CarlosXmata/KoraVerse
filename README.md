@@ -120,3 +120,5 @@ No uses este mecanismo para información corporativa confidencial, credenciales 
 - Si el **segundo jugador** recarga, solicita nuevamente el estado al anfitrión.
 - Si el **anfitrión** recarga, restaura el último estado guardado localmente y vuelve a publicarlo.
 - Si el anfitrión cierra la sala definitivamente, el segundo jugador debe esperar a que vuelva a conectarse.
+
+KORAVERSE deployed with Vercel.
