@@ -77,6 +77,9 @@ function baseShell(content) {
   const partnerPill = rt.roomCode
     ? `<div class="pill"><span class="dot" style="background:${partner ? 'var(--green)' : 'var(--gold)'}"></span>${partner ? escapeHtml(partner.name) + ' conectado/a' : 'Esperando cómplice'}</div>`
     : ''
+  const newGameButton = rt.roomCode && rt.role === 'host'
+    ? `<button class="btn soft newGameBtn" data-action="new-game" title="Reinicia todo y genera un código nuevo">↻ Nueva partida</button>`
+    : ''
   return `
     <div class="bg"></div><div class="noise"></div><div class="toast" id="toast">Listo</div>
     <div class="cow-mascot" id="cowMascot" data-action="cow"><div class="cow-tip" id="cowTip">Moo. Dos personas, una sola dimensión.</div><div class="cow-face">🐮</div></div>
@@ -85,7 +88,7 @@ function baseShell(content) {
         <div class="brand"><span class="mark"></span>KORAVERSE <span class="roleTag">DUO REALTIME</span></div>
         <div class="userline">
           ${rt.roomCode ? `<div class="pill">⭐ ${sumScores()} pts · tú ${meScore()}</div>` : ''}
-          ${roomPill}${partnerPill}
+          ${roomPill}${partnerPill}${newGameButton}
         </div>
       </header>
       ${content}
@@ -339,6 +342,7 @@ function attachChannelHandlers(ch) {
   ch.on('broadcast', {event:'case_count'}, ({payload}) => onCaseCount(payload))
   ch.on('broadcast', {event:'boss_hit'}, ({payload}) => onBossHit(payload))
   ch.on('broadcast', {event:'boss_hp'}, ({payload}) => onBossHP(payload))
+  ch.on('broadcast', {event:'new_room'}, ({payload}) => onNewRoom(payload))
 }
 
 function syncPresence() {
@@ -515,6 +519,48 @@ function updateBossHud(hp){const bar=document.getElementById('hp'),txt=document.
 function spawnAttack(){const a=document.getElementById('bossArena');if(!a)return;const x=document.createElement('div');x.className='attack';x.textContent=['URGENTE','¿STATUS?','PARA HOY','FOLLOW-UP','FAVOR VALIDAR'][Math.floor(Math.random()*5)];x.style.left=(8+Math.random()*78)+'%';x.style.top='-8px';a.appendChild(x);setTimeout(()=>x.remove(),1500)}
 function clearLoops(){if(rt.caseTimer){clearInterval(rt.caseTimer);rt.caseTimer=null}if(rt.attackTimer){clearInterval(rt.attackTimer);rt.attackTimer=null}}
 
+function resetRuntimeState(){
+  clearLoops()
+  rt.game=freshGame()
+  rt.localAnswer=null
+  rt.pendingTrivia={}
+  rt.pendingMatch={}
+  rt.seenEvents=new Set()
+}
+
+async function startNewGame(){
+  if(rt.role!=='host') return toast('Solo el anfitrión puede crear una partida nueva')
+  const ok=window.confirm('¿Crear una partida completamente nueva?\n\nSe reiniciarán puntos, preguntas, respuestas, misiones, Case Arena y The Garden. También se generará un código de sala nuevo.')
+  if(!ok) return
+
+  const oldCode=rt.roomCode
+  const newCode=randomCode()
+  const hostName=rt.name
+
+  // Si el cómplice está conectado, lo enviamos automáticamente a la nueva sala.
+  try { await send('new_room',{newCode,fromRoom:oldCode,id:eventId()}) } catch {}
+
+  if(oldCode) localStorage.removeItem(`koraverse_host_${oldCode}`)
+  localStorage.removeItem(SESSION_KEY)
+  resetRuntimeState()
+  rt.joinPrefill=''
+
+  await connectRoom('host',newCode,hostName)
+  setTimeout(()=>toast(`Nueva partida · código ${newCode}`),350)
+}
+
+async function onNewRoom(payload){
+  if(rt.role==='host' || !payload?.newCode) return
+  const code=String(payload.newCode).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
+  if(code.length!==6 || code===rt.roomCode) return
+  const playerName=rt.name
+  localStorage.removeItem(SESSION_KEY)
+  resetRuntimeState()
+  rt.joinPrefill=code
+  await connectRoom('guest',code,playerName)
+  setTimeout(()=>toast(`El anfitrión creó una nueva partida · ${code}`),350)
+}
+
 function buildFlowers(){const g=document.getElementById('garden');if(!g)return;const colors=['#ff8fb1','#ffe16f','#a886ff','#ffac78','#7fdca7','#6fc7ff'];for(let i=0;i<28;i++){const f=document.createElement('div');f.className='flower';f.style.left=(3+Math.random()*93)+'%';f.style.bottom=(36+Math.random()*76)+'px';f.style.background=colors[Math.floor(Math.random()*colors.length)];f.style.animationDelay=(Math.random()*.8)+'s';const s=document.createElement('span');s.className='stem';f.appendChild(s);f.addEventListener('click',()=>{document.getElementById('gardenQuote').textContent=quotes[Math.floor(Math.random()*quotes.length)];f.animate([{transform:'scale(1)'},{transform:'scale(1.45) rotate(8deg)'},{transform:'scale(1)'}],{duration:420})});g.appendChild(f)}}
 function confetti(){const colors=['#8b7cff','#56c8ff','#ff7fb0','#ffd56a','#7ce3a7'];for(let i=0;i<36;i++){const d=document.createElement('div');d.className='confetti';d.style.left=(45+Math.random()*10)+'vw';d.style.top='15vh';d.style.background=colors[Math.floor(Math.random()*colors.length)];d.style.animationDelay=(Math.random()*.15)+'s';document.body.appendChild(d);setTimeout(()=>d.remove(),1400)}}
 function toast(msg){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';document.body.appendChild(t)}t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
@@ -529,6 +575,7 @@ app.addEventListener('click', async e => {
   if(action==='create-room') {const name=document.getElementById('playerName')?.value||'Carlos';return connectRoom('host',randomCode(),name)}
   if(action==='join-room') {const name=document.getElementById('playerName')?.value||'Cómplice';const code=(document.getElementById('roomCodeInput')?.value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');if(code.length!==6)return toast('Introduce un código de 6 caracteres');return connectRoom('guest',code,name)}
   if(action==='leave-room') return leaveRoom()
+  if(action==='new-game') return startNewGame()
   if(action==='copy-invite') {const link=`${location.origin}${location.pathname}?room=${rt.roomCode}`;await navigator.clipboard.writeText(link);return toast('Enlace copiado')}
   if(action==='start-game') return hostAction('start_game')
   if(action==='hub') return hostAction('hub')
