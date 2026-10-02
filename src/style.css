@@ -85,6 +85,8 @@ h1{font-size:clamp(54px,7vw,96px);line-height:.91;letter-spacing:-.075em;margin:
 .btn.soft{background:rgba(255,255,255,.07);border:1px solid var(--line)}
 .btn.gold{background:linear-gradient(135deg,#f3c458,#ffe58d);color:#2c2616}
 .btn.danger{background:linear-gradient(135deg,#ff7272,#ff9a7c)}
+.newGameBtn{padding:8px 12px;font-size:11px;white-space:nowrap;border-color:rgba(255,125,125,.22)!important;background:rgba(255,125,125,.08)!important}
+.newGameBtn:hover{background:rgba(255,125,125,.15)!important}
 .row{display:flex;gap:10px;flex-wrap:wrap}
 
 .orbit{
@@ -345,4 +347,7 @@ h1{font-size:clamp(54px,7vw,96px);line-height:.91;letter-spacing:-.075em;margin:
 @media(max-width:760px){
   .roomGrid,.lobbyGrid{grid-template-columns:1fr}
   .roomCode{letter-spacing:.1em}
+  .topbar{align-items:flex-start;gap:12px}
+  .userline{justify-content:flex-end;flex-wrap:wrap}
+  .newGameBtn{order:3}
 }
