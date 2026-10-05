@@ -1,11 +1,11 @@
 {
-  "name": "KORAVERSE 4.1 — Premium Social Expansion",
+  "name": "KORAVERSE 5 — A Place Between Worlds",
   "short_name": "KORAVERSE",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0d18",
-  "theme_color": "#0a0d18",
-  "description": "Juegos, inglés, puzzles y experiencias Duo en un pequeño universo privado.",
+  "background_color": "#101320",
+  "theme_color": "#101320",
+  "description": "Un lugar tranquilo entre mundos para descansar, crear y encontrarse.",
   "icons": [
     {
       "src": "/icon.svg",

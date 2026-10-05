@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 import { Chess } from './chess-engine.js'
 import './style.css'
+import './v5.css'
+import { Ambient } from './ambient.js'
+import { mergeMessages, latestPresence } from './social-utils.js'
 import {
   triviaBank, sameBrain, missions, gardenQuotes, englishCurriculum,
   bundledEnglishExercises, sudokuPuzzles, memoryIcons, achievements,
@@ -13,9 +16,13 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
 const configured = Boolean(SUPABASE_URL && SUPABASE_KEY && !SUPABASE_URL.includes('TU-PROYECTO'))
 const supabase = configured ? createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false }
+  auth: { persistSession: false, autoRefreshToken: true }, global: { fetch: (url, options) => fetch(url, {...options, signal: options?.signal || AbortSignal.timeout(10000)}) }
 }) : null
 
+const sessionId = crypto.randomUUID()
+const ambient = new Ambient()
+let socialHeartbeat = null, lastInteraction = Date.now(), traveling = false
+const QA = { active:false, original:null, duo:null, room:null, social:null }
 const PROFILE_KEY = 'koraverse_v3_profile'
 const SOUND_KEY = 'koraverse_v3_sound'
 const ROOM_KEY = 'koraverse_v3_room'
@@ -91,17 +98,17 @@ const otherDefault = () => state.profile?.player_key === 'carlos' ? 'kora' : 'ca
 const UI = {
   es:{
     arcade:'Arcade', puzzles:'Puzzle Lab', trivia:'Trivia', english:'English Lab', duo:'Duo Realm', chill:'Chill',
-    messages:'Mensajes', profile:'Perfil', welcome:'Bienvenido de nuevo', five:'Tengo 5 minutos', invite:'Invitar', chat:'Chat', avatars:'Avatar Studio',
+    messages:'Señales', profile:'Perfil', welcome:'Bienvenido de nuevo', five:'Tengo 5 minutos', invite:'Invitar', chat:'Señales', avatars:'Avatar Studio',
     command:'CENTRO DE MANDO', explore:'EXPLORA EL UNIVERSO', appetite:'¿Qué te apetece?', progress:'Ver mi progreso →',
-    choose:'¿Quién está entrando?', enter:'Entrar', other:'Otro nombre', spanish:'Español', englishLang:'English',
+    choose:'¿Quién cruza hoy?', enter:'Entrar', other:'Otro nombre', spanish:'Español', englishLang:'English',
     online:'En línea', offline:'Desconectado', clearChat:'Limpiar chat', sketch:'Dibujar', typing:'está escribiendo…',
     theme:'Tema del perfil', discreet:'Modo discreto', level:'Nivel', streak:'días de racha', current:'actual', collection:'COLECCIÓN'
   },
   en:{
     arcade:'Arcade', puzzles:'Puzzle Lab', trivia:'Trivia', english:'English Lab', duo:'Duo Realm', chill:'Chill',
-    messages:'Messages', profile:'Profile', welcome:'Welcome back', five:'I have 5 minutes', invite:'Invite', chat:'Chat', avatars:'Avatar Studio',
+    messages:'Signals', profile:'Profile', welcome:'Welcome back', five:'I have 5 minutes', invite:'Invite', chat:'Signals', avatars:'Avatar Studio',
     command:'COMMAND CENTER', explore:'EXPLORE THE UNIVERSE', appetite:'What are you in the mood for?', progress:'View my progress →',
-    choose:'Who is entering?', enter:'Enter', other:'Other name', spanish:'Español', englishLang:'English',
+    choose:'Who crosses today?', enter:'Enter', other:'Other name', spanish:'Español', englishLang:'English',
     online:'Online', offline:'Offline', clearChat:'Clear chat', sketch:'Draw', typing:'is typing…',
     theme:'Profile theme', discreet:'Discreet mode', level:'Level', streak:'day streak', current:'current', collection:'COLLECTION'
   }
@@ -115,21 +122,21 @@ function applyTheme(){
   state.theme=id
 }
 function chatLimpiarCutoff(){return Number(localStorage.getItem(CHAT_CLEAR_PREFIX+(state.profile?.player_key||'anon'))||0)}
-function rerenderPrimary(){applyTheme(); if(!state.profile)return renderGate(); if(state.screen==='profile')return renderProfile(); if(state.screen==='avatars')return renderAvatarStudio(); return renderHome()}
+function rerenderPrimary(){applyTheme();if(WORLDS[state.screen])return renderPlanet(state.screen);if(state.screen==='settings')return renderSettings();if(state.screen==='qa')return renderQA(); if(!state.profile)return renderGate(); if(state.screen==='profile')return renderProfile(); if(state.screen==='avatars')return renderAvatarStudio(); return renderHome()}
 
 const avatarById = id => avatarCatalog.find(a=>a.id===id) || avatarCatalog[0]
 function avatarVisual(id, size='md'){
   const a=avatarById(id)
   return `<span class="avatar-visual ${size}" style="--avatar-accent:${a.accent}"><img src="${a.image||''}" alt="${esc(a.name)}" loading="lazy"><span class="avatar-fallback">${a.icon}</span><span class="avatar-badge">${a.badge}</span></span>`
 }
-function socialPresenceList(){return Object.values(state.social.presence||{}).flat()}
-function partnerPresence(){const key=otherDefault();return socialPresenceList().find(x=>x.player_key===key)}
+function socialPresenceList(){return [...Object.values(state.social.presence||{}).flat(),...(state.social.fallback||[])]}
+function partnerPresence(){if(QA.active)return QA.presence || null; return latestPresence(socialPresenceList(), otherDefault())}
 function partnerIsOnline(){return Boolean(partnerPresence())}
 function partnerLabel(){const key=otherDefault();return state.profiles.find(p=>p.player_key===key)?.display_name || (key==='kora'?'Kora':'Carlos')}
 function formatClock(v){try{return new Date(v).toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}catch{return ''}}
 
-function setTimer(fn, ms) { const id=setTimeout(()=>{state.timers.delete(id);fn()},ms);state.timers.add(id);return id }
-function clearTimers(){ for(const id of state.timers) clearTimeout(id); state.timers.clear(); if(state.raf) cancelAnimationFrame(state.raf); state.raf=null }
+function setTimer(fn, ms) { const timer={remaining:ms,last:Date.now(),id:null};const tick=()=>{const now=Date.now();if(!document.hidden&&!state.discreet)timer.remaining-=now-timer.last;timer.last=now;if(timer.remaining<=0){state.timers.delete(timer);fn()}else timer.id=setTimeout(tick,Math.min(250,timer.remaining))};timer.id=setTimeout(tick,Math.min(250,ms));state.timers.add(timer);return timer }
+function clearTimers(){window.onkeydown=null;window.onkeyup=null;if(state.invaders)state.invaders.active=false; for(const id of state.timers){clearTimeout(id?.id||id);clearInterval(id?.id||id)}; state.timers.clear(); if(state.raf) cancelAnimationFrame(state.raf); state.raf=null }
 
 function beep(type='soft') {
   if(!state.sound) return
@@ -183,7 +190,7 @@ function profileMini(){
 
 function renderChatMessages(){
   const me=state.profile?.player_key
-  const cutoff=chatLimpiarCutoff()
+  const cutoff=QA.active?0:chatLimpiarCutoff()
   const list=(state.social.messages||[]).filter(m=>new Date(m.created_at||0).getTime()>cutoff).slice(-80)
   if(!list.length) return `<div class="chat-empty"><span>✦</span><b>${state.lang==='es'?'Dimensión tranquila.':'Silencio dimension.'}</b><p>${state.lang==='es'?'Escribe algo, manda una señal o crea un dibujo.':'Write something, send a signal or make a drawing.'}</p></div>`
   return list.map(m=>{
@@ -192,7 +199,7 @@ function renderChatMessages(){
     const sketch=m.kind==='sketch'&&(m.metadata?.url||m.metadata?.data_url)
     return `<div class="chat-message ${mine?'mine':'theirs'} ${special?'special':''}">
       <div class="chat-bubble">${special&&m.kind!=='sketch'?`<small>${m.kind==='coffee_invite'?'COFFEE SIGNAL':'KORA SIGNAL'}</small>`:''}
-      ${sketch?`<div class="chat-sketch"><img src="${esc(sketch)}" alt="Dibujo compartido"><span>🎨 ${esc(m.body||'Mira lo que dibujé')}</span></div>`:`<p>${esc(m.body)}</p>`}<time>${formatClock(m.created_at||Date.now())}</time></div>
+      ${sketch?`<div class="chat-sketch"><img src="${esc(sketch)}" alt="Dibujo compartido"><span>🎨 ${esc(m.body||'Mira lo que dibujé')}</span></div>`:`<p>${esc(m.body)}</p>`}${!mine&&m.kind==='coffee_invite'?`<button class="coffee-accept" data-action="coffee-accept" data-id="${esc(m.client_id||m.id)}">${word('Sí, vamos ☕','Yes, let’s go ☕')}</button>`:''}<time>${formatClock(m.created_at||Date.now())}</time></div>
     </div>`
   }).join('')
 }
@@ -202,12 +209,12 @@ function socialDockMarkup(){
   return `<button class="social-fab ${online?'online':''}" data-action="chat-toggle" title="${tr('messages')}">
     <span>💬</span>${state.social.unread?`<i>${Math.min(9,state.social.unread)}</i>`:''}
   </button>
-  <aside id="socialPanel" class="social-panel ${state.social.open?'open':''}">
+  <aside id="socialPanel" ${state.social.open?'':'inert'} class="social-panel ${state.social.open?'open':''}">
     <div class="social-head">
       <div class="social-person">${avatarVisual(av,'sm')}<div><b>${esc(label)}</b><small id="socialPresenceText"><i class="presence-dot ${online?'on':''}"></i>${online?`${tr('online')}${pp?.screen?` · ${esc(pp.screen)}`:''}`:tr('offline')}</small></div></div>
       <div class="chat-head-actions"><button data-action="sketch-pad" title="${tr('sketch')}">🎨</button><button data-action="chat-clear" title="${tr('clearChat')}">🧹</button><button data-action="chat-toggle">×</button></div>
     </div>
-    <div class="social-quick">
+    <p class="chat-connection" id="chatConnection">${socialConnectionLabel()}</p><div class="social-quick">
       <button data-action="send-signal">✨ ¿Jugamos?</button>
       <button data-action="coffee-invite" data-coffee="coffee">☕ Café</button>
       <button data-action="quick-chat" data-message="¿Ajedrez? ♟️">♟️ Ajedrez</button>
@@ -226,52 +233,87 @@ function refreshSocialDock(){
   const fab=document.querySelector('.social-fab');if(fab){fab.classList.toggle('online',Boolean(pp));const old=fab.querySelector('i');if(old)old.remove();if(state.social.unread){const i=document.createElement('i');i.textContent=Math.min(9,state.social.unread);fab.appendChild(i)}}
   const typing=document.querySelector('#typingLine');if(typing){typing.classList.toggle('show',Boolean(state.social.typing));typing.textContent=state.social.typing?`${partnerLabel()} ${tr('typing')}`:''}
 }
-function updatePresence(screen=state.screen){
-  if(!state.social.channel||!state.profile)return
-  state.social.channel.track({player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',screen,at:Date.now()}).catch(()=>{})
+async function updatePresence(screen=state.screen){
+  if(!state.profile||QA.active)return
+  state.currentWorld=screen
+  const status=document.hidden||state.discreet||Date.now()-lastInteraction>90000?'idle':'online'
+  const payload={session_id:sessionId,player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',screen,current_world:screen,status,last_seen:new Date().toISOString(),last_activity:new Date(lastInteraction).toISOString()}
+  if(state.social.connected)await state.social.channel?.track(payload).catch(()=>{})
+  if(state.dbReady&&Date.now()-(state.social.lastHeartbeat||0)>20000){
+    state.social.lastHeartbeat=Date.now()
+    const {error}=await supabase.from('koraverse_presence').upsert(payload)
+    if(error)state.social.error='Aplica migration_v5.sql para activar el respaldo de presencia.'
+  }
 }
-async function loadChatMessages(){
-  if(state.social.loaded||!state.profile)return
-  state.social.loaded=true
+async function loadChatMessages(force=false){
+  if(!state.profile||QA.active||(!force&&state.social.loaded))return
   if(!state.dbReady)return
+  const me=state.profile.player_key,other=otherDefault()
   try{
-    const {data}=await supabase.from('koraverse_messages').select('*').order('created_at',{ascending:false}).limit(100)
-    const me=state.profile.player_key, other=otherDefault()
-    const cutoff=chatLimpiarCutoff();state.social.messages=(data||[]).filter(m=>((m.from_player===me&&m.to_player===other)||(m.from_player===other&&m.to_player===me))&&new Date(m.created_at||0).getTime()>cutoff).reverse()
-  }catch{}
+    const {data,error}=await supabase.from('koraverse_messages').select('*').or('and(from_player.eq.'+me+',to_player.eq.'+other+'),and(from_player.eq.'+other+',to_player.eq.'+me+')').order('created_at',{ascending:false}).limit(100)
+    if(error)throw error
+    state.social.messages=mergeMessages(state.social.messages,data||[])
+    state.social.loaded=true;state.social.error=null
+    refreshSocialDock()
+  }catch{state.social.loaded=false;state.social.error='No se pudo recuperar el historial. Reintentaremos.'}
 }
 function receiveChatMessage(msg){
   if(!msg||!state.profile)return
   const me=state.profile.player_key, other=otherDefault()
   if(!((msg.from_player===me&&msg.to_player===other)||(msg.from_player===other&&msg.to_player===me)))return
-  if(msg.id&&state.social.messages.some(x=>x.id===msg.id))return
-  state.social.messages.push(msg)
-  if(msg.from_player!==me&&!state.social.open){state.social.unread++;toast(msg.kind==='coffee_invite'?msg.body:`${partnerLabel()}: ${msg.body}`,'signal');beep('signal')}
+  if(state.social.messages.some(x=>(msg.id&&String(x.id)===String(msg.id))||(msg.client_id&&x.client_id===msg.client_id)))return
+  state.social.messages=mergeMessages(state.social.messages,[msg])
+  if(msg.from_player!==me&&!state.social.open){state.social.unread++;if(!['minute','library','rain-room'].includes(state.screen)){toast(msg.kind==='coffee_invite'?msg.body:`${partnerLabel()}: ${msg.body}`,'signal');beep('signal')}}
   refreshSocialDock()
 }
 async function setupSocialLayer(){
-  if(!supabase||!state.profile)return
+  if(!supabase||!state.profile||QA.active)return
+  clearInterval(socialHeartbeat)
   if(state.social.channel)await supabase.removeChannel(state.social.channel)
-  state.social.loaded=false
-  const ch=supabase.channel('koraverse-social-v4',{config:{presence:{key:`${state.profile.player_key}:${deviceId}`},broadcast:{self:false}}})
+  state.social.loaded=false;state.social.connected=false
+  const ch=supabase.channel('koraverse:presence',{config:{presence:{key:sessionId},broadcast:{self:false}}})
   state.social.channel=ch
   ch.on('presence',{event:'sync'},()=>{state.social.presence=ch.presenceState()||{};refreshSocialDock()})
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'koraverse_messages'},({new:row})=>receiveChatMessage(row))
     .on('broadcast',{event:'chat_message'},({payload})=>receiveChatMessage(payload))
-    .on('broadcast',{event:'typing'},({payload})=>{if(payload?.from!==state.profile.player_key){state.social.typing=payload?.active?payload.from:null;refreshSocialDock();if(payload?.active)setTimer(()=>{state.social.typing=null;refreshSocialDock()},1800)}})
-  await new Promise(resolve=>ch.subscribe(async status=>{if(status==='SUBSCRIBED'){await updatePresence(state.screen);resolve()}}))
-  await loadChatMessages();refreshSocialDock()
+    .on('broadcast',{event:'typing'},({payload})=>{if(payload?.from===otherDefault()){state.social.typing=payload.active?payload.from:null;refreshSocialDock();clearTimeout(state.social.typingTimer);state.social.typingTimer=setTimeout(()=>{state.social.typing=null;refreshSocialDock()},2200)}})
+  await new Promise(resolve=>{
+    const timeout=setTimeout(resolve,4500)
+    ch.subscribe(status=>{
+      if(state.social.channel!==ch)return
+      state.social.connected=status==='SUBSCRIBED'
+      if(status==='SUBSCRIBED'){clearTimeout(timeout);updatePresence();loadChatMessages(true);resolve()}
+      if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)){state.social.presence={};state.social.error='Reconectando Señales…';resolve()}
+      refreshSocialDock()
+    })
+  })
+  await loadChatMessages(true)
+  socialHeartbeat=setInterval(async()=>{
+    if(!state.profile||QA.active||document.hidden)return
+    await updatePresence(state.currentWorld||state.screen)
+    await loadChatMessages(true)
+    if(state.dbReady){const {data}=await supabase.from('koraverse_presence').select('*').gt('last_seen',new Date(Date.now()-65000).toISOString());state.social.fallback=data||[];refreshSocialDock()}
+  },25000)
+  refreshSocialDock()
 }
 async function sendChatMessage(body,kind='text',metadata={}){
-  body=String(body||'').trim();if(!body||!state.profile)return
-  const row={from_player:state.profile.player_key,to_player:otherDefault(),body,kind,metadata,created_at:new Date().toISOString()}
-  let saved=row
-  if(state.dbReady){try{const {data}=await supabase.from('koraverse_messages').insert(row).select().single();if(data)saved=data}catch{}}
-  receiveChatMessage(saved)
-  await state.social.channel?.send({type:'broadcast',event:'chat_message',payload:saved})
+  body=String(body||'').trim().slice(0,240);if(!body||!state.profile)return false
+  const row={client_id:crypto.randomUUID(),from_player:state.profile.player_key,to_player:otherDefault(),body,kind,metadata,created_at:new Date().toISOString()}
+  if(QA.active){receiveChatMessage({...row,id:'qa-'+row.client_id});return true}
+  if(!state.dbReady){toast('Señales necesita Supabase conectado. Tu mensaje sigue en el campo.');return false}
+  try{
+    const {data,error}=await supabase.from('koraverse_messages').insert(row).select().single()
+    if(error||!data)throw error||new Error('No confirmation')
+    receiveChatMessage(data)
+    state.social.channel?.send({type:'broadcast',event:'chat_message',payload:data}).catch(()=>{})
+    if(kind==='sketch')recordStar('first-sketch','Un dibujo cruzó el cielo','🎨')
+    if(kind==='coffee_invite')recordStar('first-coffee','Una señal cálida','☕')
+    return true
+  }catch{toast('No se guardó la señal. Revisa la conexión o la migración.');return false}
 }
 async function toggleChat(){
   await loadChatMessages();state.social.open=!state.social.open;if(state.social.open)state.social.unread=0
-  const p=document.querySelector('#socialPanel');if(p)p.classList.toggle('open',state.social.open)
+  const p=document.querySelector('#socialPanel');if(p){p.classList.toggle('open',state.social.open);p.inert=!state.social.open}
   refreshSocialDock();if(state.social.open)setTimer(()=>document.querySelector('#chatInput')?.focus(),120)
 }
 
@@ -281,23 +323,18 @@ async function sendTyping(active=true){
 }
 function clearChatForMe(){
   if(!confirm(state.lang==='es'?'¿Limpiar el chat de esta pantalla? Los mensajes no se borrarán para la otra persona.':'Clear this chat view? Messages will not be deleted for the other person.'))return
-  localStorage.setItem(CHAT_CLEAR_PREFIX+state.profile.player_key,String(Date.now()));state.social.messages=[];state.social.unread=0;refreshSocialDock();toast(state.lang==='es'?'Chat limpio para ti.':'Chat cleared for you.')
+  if(!QA.active)localStorage.setItem(CHAT_CLEAR_PREFIX+state.profile.player_key,String(Date.now()));state.social.messages=[];state.social.unread=0;refreshSocialDock();toast(state.lang==='es'?'Chat limpio para ti.':'Chat cleared for you.')
 }
 
 function shell(content,{world='home',back=null}={}){
   const connected=state.room.connected && state.room.code
   updatePresence(world);applyTheme()
-  return `${starsMarkup()}<div id="toast" class="toast"></div>
+  return `${starsMarkup()}${QA.active?'<div class="qa-banner">Laboratorio QA · Progreso de prueba <button data-action="qa-exit">Salir y restaurar</button></div>':''}<div id="toast" class="toast"></div>
   <div class="app-shell world-${world}">
     <header class="topbar-v3">
-      <button class="brand-v3" data-action="home"><span class="brand-orb"></span><span>KORAVERSE<small>PREMIUM SOCIAL</small></span></button>
-      <nav class="topnav">
-        <button data-action="world" data-world="arcade">${tr('arcade')}</button>
-        <button data-action="world" data-world="puzzles">${tr('puzzles')}</button>
-        <button data-action="world" data-world="trivia">${tr('trivia')}</button>
-        <button data-action="world" data-world="english">${tr('english')}</button>
-        <button data-action="duo-entry">${tr('duo')}</button>
-        <button data-action="world" data-world="chill">${tr('chill')}</button>
+      <button class="brand-v3" data-action="home"><span class="brand-orb"></span><span>KORAVERSE<small>A PLACE BETWEEN WORLDS</small></span></button>
+      <button class="world-menu-toggle" data-action="world-menu" aria-expanded="false">${word('Mundos','Worlds')} ↗</button><nav class="topnav" aria-label="Mundos">
+        ${Object.entries(WORLDS).map(([id,w])=>`<button data-action="planet" data-planet="${id}">${w[state.lang].name}</button>`).join('')}
       </nav>
       <div class="top-actions">
         ${connected?`<span class="live-pill"><i></i>${state.room.code}</span>`:''}
@@ -305,11 +342,11 @@ function shell(content,{world='home',back=null}={}){
         <button class="lang-toggle" data-action="language" title="Idioma / Language">${state.lang==='es'?'ES':'EN'}</button>
         <button class="icon-btn chat-top" data-action="chat-toggle" title="${tr('messages')}">💬${state.social.unread?`<b>${Math.min(9,state.social.unread)}</b>`:''}</button>
         <button class="icon-btn" data-action="sound" title="Sonido">${state.sound?'🔊':'🔇'}</button>
-        ${profileMini()}
+        <button class="icon-btn" data-action="settings" aria-label="Preferencias">⚙</button>${profileMini()}
       </div>
     </header>
     <main class="main-wrap">
-      ${back?`<button class="back-v3" data-action="${back.action}" ${back.world?`data-world="${back.world}"`:''}>← ${back.label}</button>`:''}
+      ${back?`<button class="back-v3" data-action="${back.action}" ${back.world?`data-world="${back.world}"`:''}>← ${back.label==='Command Center'?(state.lang==='es'?'Entre mundos':'Between worlds'):back.label}</button>`:''}
       ${content}
     </main>
     ${socialDockMarkup()}
@@ -323,7 +360,7 @@ async function init(){
   const saved=localStorage.getItem(PROFILE_KEY)
   if(saved){ try{ state.profile=JSON.parse(saved) }catch{} }
   if(state.profile){
-    await hydrateProfile(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
+    await hydrateProfile(); await loadStars(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
     const queryRoom=new URLSearchParams(location.search).get('room')?.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
     let savedRoom=null;try{savedRoom=JSON.parse(localStorage.getItem(ROOM_KEY)||'null')}catch{}
     if(queryRoom?.length===6){
@@ -382,6 +419,7 @@ function touchStreak(){
 }
 
 async function persistProfile(refresh=true){
+  if(QA.active)return
   state.profile.last_seen=new Date().toISOString()
   localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile));localStorage.setItem(`koraverse_profile_${state.profile.player_key}`,JSON.stringify(state.profile))
   if(state.dbReady){ try{await supabase.from('koraverse_profiles').upsert({...state.profile,updated_at:new Date().toISOString()})}catch{} }
@@ -390,11 +428,16 @@ async function persistProfile(refresh=true){
 
 async function awardXP(amount,category='general',source='activity',{duo=false,silent=false}={}){
   if(!state.profile||amount<=0)return
+  if(QA.active){state.profile.xp+=amount;return toast('XP de prueba · '+amount)}
+  recordStar('first-'+category,source,'✦')
+  if(/sudoku/i.test(source))recordStar('first-sudoku','Un Sudoku encontró su forma','🧩')
+  if(/chess/i.test(source))recordStar('first-chess','Una partida entre dos mundos','♟')
   const oldLevel=levelFromXP(state.profile.xp||0)
   state.profile.xp=(state.profile.xp||0)+amount
   const field={english:'english_xp',puzzle:'puzzle_xp',arcade:'arcade_xp',trivia:'trivia_xp',duo:'duo_xp'}[category]
   if(field) state.profile[field]=(state.profile[field]||0)+amount
   await persistProfile()
+  state.activity.unshift({category,source,xp:amount,created_at:new Date().toISOString()})
   if(state.dbReady){
     supabase.from('koraverse_activity').insert({player_key:state.profile.player_key,category,source,xp:amount}).then(()=>{})
   }
@@ -405,6 +448,7 @@ async function awardXP(amount,category='general',source='activity',{duo=false,si
 }
 
 async function awardDuoXP(amount){
+  if(QA.active){state.duoStats.xp+=amount;return}
   state.duoStats.xp=(state.duoStats.xp||0)+amount
   if(state.dbReady){ try{await supabase.from('koraverse_duo').update({xp:state.duoStats.xp,updated_at:new Date().toISOString()}).eq('id',1)}catch{} }
 }
@@ -415,7 +459,7 @@ function renderGate(){
   app.innerHTML=`${gateGalaxyMarkup()}<div class="gate-wrap cinematic-gate">
     <div class="gate-language"><button data-action="language">${state.lang==='es'?'ES · Español':'EN · English'}</button></div>
     <div class="gate-card glass-xl">
-      <div class="gate-brand"><span class="brand-orb huge"></span><div><small>${state.lang==='es'?'BIENVENIDO A':'WELCOME TO'}</small><h1>KORAVERSE</h1><p>${state.lang==='es'?'Un universo privado para jugar, aprender, crear y desaparecer cinco minutos.':'A private universe to play, learn, create and disappear for five minutes.'}</p></div></div>
+      <div class="gate-brand"><span class="brand-orb huge"></span><div><small>${state.lang==='es'?'BIENVENIDO A':'WELCOME TO'}</small><h1>KORAVERSE</h1><p>${state.lang==='es'?'Hay días que pesan más de la cuenta. Aquí no tienes que resolver nada. Puedes jugar, aprender algo… o simplemente quedarte un rato.':'Some days feel heavier than others. Here, you do not have to solve anything. Play, learn a little… or simply stay awhile.'}</p></div></div>
       <div class="gate-question">${tr('choose')}</div>
       <div class="profile-choices premium-identities">
         <button class="identity-card kora" data-action="choose-profile" data-name="Kora">${avatarVisual(kora.avatar_id||'cow-classic','gate')}<div><b>Kora</b><small>${tr('level')} ${levelFromXP(kora.xp||0)} · ${kora.xp||0} XP</small></div></button>
@@ -497,11 +541,10 @@ function podiumBlock(){
   </section>`
 }
 
-function renderHome(){
-  state.screen='home'; clearTimers(); app.innerHTML=shell(`${dashboardHero()}${worldPreview()}${podiumBlock()}`,{world:'home'})
-}
+function renderHome(){renderUniverseHome()}
 
 function renderWorld(world){
+  if(WORLDS[world])return renderPlanet(world)
   clearTimers(); state.screen=world
   if(world==='trivia') return renderTriviaHub()
   const map={
@@ -638,7 +681,7 @@ function flipMemory(index){const m=state.memory;if(m.lock)return;const card=m.de
 
 // ---------- CHAOS ----------
 function startCaos(){state.chaos={score:0,end:Date.now()+30000,active:true};renderCaos();setTimer(()=>finishCaos(),30000);spawnCaosTarget()}
-function renderCaos(){const remain=Math.max(0,Math.ceil(((state.chaos?.end||Date.now())-Date.now())/1000));app.innerHTML=shell(`<section class="game-header"><div><small>ARCADE · ${state.lang==='es'?'CAOS DE 30 SEGUNDOS':'30 SECOND CHAOS'}</small><h1>${state.lang==='es'?'Atrapa lo urgente.':'Catch the urgent.'}</h1><p>Haz clic en cada “urgente” antes de que cambie de lugar. Sí, esto cuenta como terapia.</p></div><div class="game-stat"><small>${state.lang==='es'?'PUNTOS':'SCORE'}</small><b id="chaosScore">${state.chaos.score}</b></div></section><div class="chaos-arena" id="chaosArena"><div class="chaos-time"><span id="chaosTime">${remain}</span>s</div></div>`,{world:'arcade',back:{action:'world',world:'arcade',label:'Arcade'}});const tick=setInterval(()=>{const el=document.querySelector('#chaosTime');if(!el){clearInterval(tick);return}el.textContent=Math.max(0,Math.ceil((state.chaos.end-Date.now())/1000))},250);state.timers.add(tick)}
+function renderCaos(){const remain=Math.max(0,Math.ceil(((state.chaos?.end||Date.now())-Date.now())/1000));app.innerHTML=shell(`<section class="game-header"><div><small>ARCADE · ${state.lang==='es'?'CAOS DE 30 SEGUNDOS':'30 SECOND CHAOS'}</small><h1>${state.lang==='es'?'Atrapa lo urgente.':'Catch the urgent.'}</h1><p>Haz clic en cada “urgente” antes de que cambie de lugar. Sí, esto cuenta como terapia.</p></div><div class="game-stat"><small>${state.lang==='es'?'PUNTOS':'SCORE'}</small><b id="chaosScore">${state.chaos.score}</b></div></section><div class="chaos-arena" id="chaosArena"><div class="chaos-time"><span id="chaosTime">${remain}</span>s</div></div>`,{world:'arcade',back:{action:'world',world:'arcade',label:'Arcade'}});const tick=setInterval(()=>{const el=document.querySelector('#chaosTime');if(!el){clearInterval(tick);return}if(document.hidden||state.discreet)return;el.textContent=Math.max(0,Math.ceil((state.chaos.end-Date.now())/1000))},250);state.timers.add(tick)}
 function spawnCaosTarget(){if(!state.chaos?.active)return;const arena=document.querySelector('#chaosArena');if(!arena)return;arena.querySelector('.chaos-target')?.remove();const b=document.createElement('button');b.className='chaos-target';b.textContent=random(['URGENTE','¿ESTADO?','PARA HOY','FAVOR VALIDAR','ASAP']);b.style.left=(5+Math.random()*78)+'%';b.style.top=(12+Math.random()*70)+'%';b.onclick=()=>{state.chaos.score++;document.querySelector('#chaosScore').textContent=state.chaos.score;beep('soft');spawnCaosTarget()};arena.appendChild(b);setTimer(()=>{if(b.isConnected)spawnCaosTarget()},1200)}
 async function finishCaos(){if(!state.chaos?.active)return;state.chaos.active=false;const score=state.chaos.score;await awardXP(20+score*2,'arcade',state.lang==='es'?'Caos de 30 segundos':'30 Second Chaos');app.innerHTML=shell(`<section class="result-screen"><div class="result-orb danger-r">⚡</div><small>${state.lang==='es'?'CAOS SUPERADO':'CHAOS SURVIVED'}</small><h1>${score}</h1><p>urgencias neutralizadas en 30 segundos.</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="chaos">Otra vez</button><button class="btn-v3 soft" data-action="world" data-world="arcade">Arcade</button></div></section>`,{world:'arcade'})}
 
@@ -653,7 +696,7 @@ function setupInvadersCanvas(){
   const inv=state.invaders;const fire=()=>{if(!inv.active)return;inv.shots.push({x:inv.shipX*canvas.clientWidth,y:canvas.clientHeight-62});beep('soft')};
   canvas.onpointermove=e=>{const r=canvas.getBoundingClientRect();inv.shipX=clamp((e.clientX-r.left)/r.width,.05,.95)};canvas.onpointerdown=fire
   window.onkeydown=e=>{inv.keys[e.key]=true;if(e.code==='Space'){e.preventDefault();fire()}};window.onkeyup=e=>inv.keys[e.key]=false
-  function frame(t){if(!inv.active)return;if(inv.keys.ArrowLeft)inv.shipX=clamp(inv.shipX-.012,.05,.95);if(inv.keys.ArrowRight)inv.shipX=clamp(inv.shipX+.012,.05,.95);if(t-inv.lastSpawn>620){inv.lastSpawn=t;inv.cases.push({x:.08+Math.random()*.84,y:-35,s:28+Math.random()*20,v:.55+Math.random()*.65,label:random(['INC','REQ','URG','REV','MAIL'])})}
+  function frame(t){if(!inv.active)return;if(document.hidden||state.discreet){state.raf=requestAnimationFrame(frame);return;}if(inv.keys.ArrowLeft)inv.shipX=clamp(inv.shipX-.012,.05,.95);if(inv.keys.ArrowRight)inv.shipX=clamp(inv.shipX+.012,.05,.95);if(t-inv.lastSpawn>620){inv.lastSpawn=t;inv.cases.push({x:.08+Math.random()*.84,y:-35,s:28+Math.random()*20,v:.55+Math.random()*.65,label:random(['INC','REQ','URG','REV','MAIL'])})}
     const W=canvas.clientWidth,H=canvas.clientHeight;ctx.clearRect(0,0,W,H);drawSpace(ctx,W,H,t);inv.shots.forEach(s=>s.y-=8);inv.cases.forEach(c=>c.y+=c.v);
     inv.shots=inv.shots.filter(s=>s.y>-20);let destroyed=[];for(let ci=0;ci<inv.cases.length;ci++){const c=inv.cases[ci];const x=c.x*W;for(let si=0;si<inv.shots.length;si++){const s=inv.shots[si];if(Math.abs(s.x-x)<28&&Math.abs(s.y-c.y)<28){destroyed.push(ci);inv.shots.splice(si,1);inv.score++;if(inv.duo)sendRoom('arcade_hit',{id:crypto.randomUUID()});break}}}
     destroyed=[...new Set(destroyed)].sort((a,b)=>b-a);destroyed.forEach(i=>inv.cases.splice(i,1));
@@ -668,14 +711,14 @@ function drawCase(ctx,x,y,label){ctx.save();ctx.translate(x,y);ctx.shadowBlur=12
 async function finishInvaders(){const inv=state.invaders;if(!inv?.active)return;inv.active=false;if(state.raf)cancelAnimationFrame(state.raf);const xp=25+inv.score*3;await awardXP(xp,'arcade','Case Invaders',{duo:inv.duo});if(inv.duo)sendRoom('arcade_done',{score:inv.score});app.innerHTML=shell(`<section class="result-screen"><div class="result-orb danger-r">🚀</div><small>OLEADA COMPLETA</small><h1>${inv.score}</h1><p>casos destruidos · +${xp} XP</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="case-invaders">Otra wave</button><button class="btn-v3 soft" data-action="${inv.duo?'duo-hub':'world'}" ${!inv.duo?'data-world="arcade"':''}>${inv.duo?'Duo Realm':'Arcade'}</button></div></section>`,{world:'arcade'})}
 
 // ---------- CHILL ----------
-function renderGarden(){state.screen='garden';clearTimers();const flowers=Array.from({length:34},(_,i)=>`<button class="flower-v3" style="--x:${3+Math.random()*94}%;--y:${3+Math.random()*40}%;--d:${Math.random()*2}s;--c:${random(['#ff8fb1','#ffe16f','#a886ff','#ffac78','#7fdca7','#6fc7ff'])}" data-action="garden-flower"></button>`).join('');app.innerHTML=shell(`<section class="garden-v3"><div class="garden-sky"><div class="sun-v3"></div><div class="cloud-v3 c1"></div><div class="cloud-v3 c2"></div></div><div class="garden-message glass"><small>THE GARDEN</small><h2>Por hoy, el caos puede esperar.</h2><p id="gardenQuote">${random(gardenQuotes)}</p></div>${flowers}<div class="garden-ground"></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
+function renderGarden(){state.screen='garden';clearTimers();const flowers=Array.from({length:34},(_,i)=>`<button class="flower-v3" style="--x:${3+Math.random()*94}%;--y:${3+Math.random()*40}%;--d:${Math.random()*2}s;--c:${random(['#ff8fb1','#ffe16f','#a886ff','#ffac78','#7fdca7','#6fc7ff'])}" data-action="garden-flower"></button>`).join('');app.innerHTML=shell(`<section class="garden-v3"><div class="garden-sky"><div class="sun-v3"></div><div class="cloud-v3 c1"></div><div class="cloud-v3 c2"></div></div><div class="garden-message glass"><small>THE GARDEN</small><h2>Por hoy, el caos puede esperar.</h2><p id="gardenQuote">${random(gardenQuotes)}</p></div>${flowers}<div class="garden-ground"></div><div class="garden-inhabitant">${avatarVisual(state.profile.avatar_id,'lg')}</div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function starDrift(){state.screen='star-drift';app.innerHTML=shell(`<section class="drift"><div class="drift-copy"><small>STAR DRIFT · PAUSA DE 2 MIN</small><h1>Aquí no tienes que ganar nada.</h1><p>Mueve el cursor. Respira. Recoge luz si quieres.</p></div><div class="drift-field" id="driftField"><div class="drift-star" id="driftStar">✦</div>${Array.from({length:24},()=>`<i style="left:${Math.random()*96}%;top:${Math.random()*94}%;animation-delay:${Math.random()*3}s"></i>`).join('')}</div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}});const f=document.querySelector('#driftField'),s=document.querySelector('#driftStar');f.onpointermove=e=>{const r=f.getBoundingClientRect();s.style.transform=`translate(${e.clientX-r.left-18}px,${e.clientY-r.top-18}px)`}}
 function coffeeBreak(){
   state.screen='coffee'
   const qs=['¿Qué fue lo menos terrible de hoy?','Si pudieras salir ahora mismo, ¿a dónde irías?','¿Qué canción describiría tu energía de este momento?','¿Qué pequeña cosa te gustaría que pasara antes de terminar el día?','¿Café, postre, libro o paseo?']
   app.innerHTML=shell(`<section class="coffee-premium"><div class="coffee-main"><div class="coffee-cup">☕</div><small>COFFEE BREAK · SOCIAL CHILL</small><h1>${random(qs)}</h1><p>No hay respuesta correcta. Pero sí puedes convertir la pausa digital en una invitación real.</p><div class="coffee-actions">${coffeeActions.map(a=>`<button data-action="coffee-invite" data-coffee="${a.id}"><span>${a.icon}</span><b>${a.label}</b><small>${partnerIsOnline()?'Enviar ahora':'Quedará en el chat'}</small></button>`).join('')}</div><button class="btn-v3 soft" data-action="coffee">Otra pregunta</button></div><aside class="coffee-status glass"><small>DUO ESTADO</small>${avatarVisual(state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||'cow-classic','lg')}<b>${esc(partnerLabel())}</b><p><i class="presence-dot ${partnerIsOnline()?'on':''}"></i>${partnerIsOnline()?'Online en KORAVERSE':'Offline · verá tu invitación al entrar'}</p><button class="btn-v3 soft" data-action="chat-toggle">Abrir chat</button></aside></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})
 }
-async function sendCoffeeInvite(id){const item=coffeeActions.find(x=>x.id===id)||coffeeActions[0];await sendChatMessage(item.message,'coffee_invite',{action:id});toast(`${item.icon} Invitación enviada`,'signal');beep('signal');fetch('/api/kora-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_player:state.profile.player_key,to_player:otherDefault(),from_name:state.profile.display_name,message:item.message,kind:'coffee'})}).catch(()=>{})}
+async function sendCoffeeInvite(id){const item=coffeeActions.find(x=>x.id===id)||coffeeActions[0];const ok=await sendChatMessage(item.message,'coffee_invite',{action:id});if(!ok)return;toast(item.icon+' '+word('Invitación enviada','Invitation sent'),'signal');beep('signal');if(!QA.active)fetch('/api/kora-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_player:state.profile.player_key,to_player:otherDefault(),from_name:state.profile.display_name,message:item.message,kind:'coffee'})}).catch(()=>{})}
 function rainRoom(){state.screen='rain-room';app.innerHTML=shell(`<section class="rain-room"><div class="rain-window">${Array.from({length:70},(_,i)=>`<i style="--x:${Math.random()*100}%;--d:${Math.random()*2.4}s;--s:${.7+Math.random()*1.4}"></i>`).join('')}<div class="rain-copy glass"><small>SALA DE LLUVIA</small><h1>Nada que resolver.</h1><p>Quédate aquí un minuto. La lluvia no necesita seguimiento.</p><button class="btn-v3 soft" data-action="coffee-invite" data-coffee="five">Invitar a mini break</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function moodOrbit(){state.screen='mood';const moods=[['calm','🌿','Tranquilo'],['tired','🌙','Cansado'],['chaos','⚡','Caos'],['happy','✨','Bien'],['quiet','☁️','Silencio']];app.innerHTML=shell(`<section class="mood-room"><small>MOOD ORBIT</small><h1>¿Qué energía tiene el día?</h1><p>Esto no puntúa. Solo cambia un poco el universo.</p><div class="mood-grid">${moods.map(([id,ic,label])=>`<button class="${state.mood===id?'active':''}" data-action="mood-select" data-mood="${id}"><span>${ic}</span><b>${label}</b></button>`).join('')}</div><div class="mood-planet mood-${state.mood||'calm'}"></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function selectMood(m){state.mood=m;beep('soft');moodOrbit()}
@@ -686,7 +729,7 @@ function quietLibraryRoom(){state.screen='library';app.innerHTML=shell(`<section
 function renderProfile(){
   state.screen='profile';const p=xpProgress(),earned=achievements.filter(a=>a.level?p.level>=a.level:(state.profile[a.category||'xp']||0)>=a.threshold),av=avatarById(state.profile.avatar_id)
   const themes=[['nebula','🌌','Nebula'],['midnight','🌙','Midnight'],['aurora','🌈','Aurora'],['rose','🌸','Rose Dust'],['garden','🌿','Garden Glow'],['retro','🕹️','Retro Arcade'],['writers','📚','Writers’ Room'],['coffee','☕','Coffee Night']]
-  const recent=state.activity.length?state.activity.slice(0,6).map(a=>`<li><span>${a.category==='english'?'🇬🇧':a.category==='arcade'?'🚀':a.category==='puzzle'?'🧩':a.category==='trivia'?'🎬':'✨'}</span><div><b>${esc(a.source)}</b><small>+${a.xp} XP · ${formatClock(a.created_at)}</small></div></li>`).join(''):`<li><span>✨</span><div><b>${state.lang==='es'?'Tu historia empieza aquí.':'Your story starts here.'}</b><small>KORAVERSE 4.1</small></div></li>`
+  const recent=state.activity.length?state.activity.slice(0,6).map(a=>`<li><span>${a.category==='english'?'🇬🇧':a.category==='arcade'?'🚀':a.category==='puzzle'?'🧩':a.category==='trivia'?'🎬':'✨'}</span><div><b>${esc(a.source)}</b><small>+${a.xp} XP · ${formatClock(a.created_at)}</small></div></li>`).join(''):`<li><span>✨</span><div><b>${state.lang==='es'?'Tu historia empieza aquí.':'Your story starts here.'}</b><small>KORAVERSE 5</small></div></li>`
   app.innerHTML=shell(`<section class="profile-universe">
     <div class="profile-stage"><div class="profile-stage-stars"></div>${avatarVisual(av.id,'full')}<div class="profile-avatar-copy"><small>${state.lang==='es'?'AVATAR ACTUAL':'CURRENT AVATAR'}</small><b>${esc(av.name)}</b></div></div>
     <div class="profile-overview"><small>${state.lang==='es'?'UNIVERSO DEL JUGADOR':'PLAYER UNIVERSE'}</small><h1>${esc(state.profile.display_name)}</h1><p>${tr('level')} ${p.level} · ${state.profile.xp} XP · 🔥 ${state.profile.streak||1} ${tr('streak')}</p>
@@ -697,18 +740,18 @@ function renderProfile(){
   <section class="profile-grid premium-profile-grid"><div class="profile-panel glass"><small>PROGRESO AL NIVEL ${p.level+1}</small><div class="big-progress"><i style="width:${p.pct}%"></i></div><b>${state.profile.xp} XP</b><p>${p.next} XP restantes.</p></div><div class="profile-panel glass stats-list"><div><span>🇬🇧 English</span><b>${state.profile.english_xp||0}</b></div><div><span>🎬 Trivia</span><b>${state.profile.trivia_xp||0}</b></div><div><span>🧩 Puzzles</span><b>${state.profile.puzzle_xp||0}</b></div><div><span>🚀 Arcade</span><b>${state.profile.arcade_xp||0}</b></div><div><span>🤝 Duo</span><b>${state.profile.duo_xp||0}</b></div></div></section>
   <section class="section-block"><div class="section-title"><div><small>${tr('theme').toUpperCase()}</small><h2>${state.lang==='es'?'Haz que el universo se parezca a ti.':'Make the universe feel like you.'}</h2></div></div><div class="theme-grid">${themes.map(([id,ic,label])=>`<button class="theme-card theme-${id} ${state.theme===id?'active':''}" data-action="theme" data-theme="${id}"><span>${ic}</span><b>${label}</b><i>${state.theme===id?'✓':''}</i></button>`).join('')}</div></section>
   <section class="profile-life-grid"><div class="profile-feed glass"><small>${state.lang==='es'?'ÚLTIMAMENTE EN TU UNIVERSO':'RECENTLY IN YOUR UNIVERSE'}</small><ul>${recent}</ul></div><div class="profile-collection glass"><small>${state.lang==='es'?'COLECCIÓN':'COLLECTION'}</small>${avatarVisual(av.id,'lg')}<b>${esc(av.name)}</b><p>${esc(av.blurb)}</p><button class="btn-v3 soft" data-action="avatar-studio">Ver colección →</button></div></section>
-  <section class="section-block"><div class="section-title"><div><small>LOGROS</small><h2>${earned.length}/${achievements.length} desbloqueados</h2></div></div><div class="achievement-grid">${achievements.map(a=>{const ok=earned.some(e=>e.id===a.id);return `<div class="achievement ${ok?'unlocked':''}"><span>${a.icon}</span><div><b>${a.title}</b><p>${a.desc}</p></div><i>${ok?'✓':'🔒'}</i></div>`}).join('')}</div></section>${podiumBlock()}`,{world:'home',back:{action:'home',label:'Command Center'}})
+  <section class="section-block"><div class="section-title"><div><small>LOGROS</small><h2>${earned.length}/${achievements.length} desbloqueados</h2></div></div><div class="achievement-grid">${achievements.map(a=>{const ok=earned.some(e=>e.id===a.id);return `<div class="achievement ${ok?'unlocked':''}"><span>${a.icon}</span><div><b>${a.title}</b><p>${a.desc}</p></div><i>${ok?'✓':'🔒'}</i></div>`}).join('')}</div></section>${constellationMarkup()}`,{world:'home',back:{action:'home',label:'Command Center'}})
 }
 
 function renderAvatarStudio(){
   state.screen='avatars';const xp=state.profile.xp||0;const groups=[...new Set(avatarCatalog.map(a=>a.collection))]
-  app.innerHTML=shell(`<section class="avatar-hero"><div><small>AVATAR STUDIO · COLECCIONA Y EXPRÉSATE</small><h1>Elige tu<br><span>dimensión.</span></h1><p>Vaquitas, animales, escritores y arquetipos originales. Los avatares ahora tienen cuerpo completo y algunos se desbloquean jugando.</p></div><div class="avatar-stage glass-xl">${avatarVisual(state.profile.avatar_id,'full')}<b>${esc(avatarById(state.profile.avatar_id).name)}</b><small>${xp} XP · ${tr('current')}</small></div></section>${groups.map(g=>`<section class="avatar-collection"><div class="section-title"><div><small>${tr('collection')}</small><h2>${esc(g)}</h2></div></div><div class="avatar-grid">${avatarCatalog.filter(a=>a.collection===g).map(a=>{const unlocked=xp>=a.unlock,selected=a.id===state.profile.avatar_id;return `<button class="avatar-card ${selected?'selected':''} ${unlocked?'':'locked'}" data-action="select-avatar" data-avatar="${a.id}">${avatarVisual(a.id,'lg')}<small>${a.unlock?`${a.unlock} XP`:'STARTER'}</small><h3>${esc(a.name)}</h3><p>${esc(a.blurb)}</p><i>${selected?'ACTUAL':unlocked?'ELEGIR →':'🔒 BLOQUEADO'}</i></button>`}).join('')}</div></section>`).join('')}`,{world:'home',back:{action:'profile',label:'Profile'}})
+  app.innerHTML=shell(`<section class="avatar-hero"><div><small>AVATAR STUDIO · COLECCIONA Y EXPRÉSATE</small><h1>Elige tu<br><span>dimensión.</span></h1><p>Vaquitas, animales, escritores y arquetipos originales. Los avatares ahora tienen cuerpo completo y algunos se desbloquean jugando.</p></div><div class="avatar-stage glass-xl">${avatarVisual(state.profile.avatar_id,'full')}<b>${esc(avatarById(state.profile.avatar_id).name)}</b><small>${xp} XP · ${tr('current')}</small></div></section>${groups.map(g=>`<section class="avatar-collection"><div class="section-title"><div><small>${tr('collection')}</small><h2>${esc(g)}</h2></div></div><div class="avatar-grid">${avatarCatalog.filter(a=>a.collection===g).map(a=>{const unlocked=QA.active||xp>=a.unlock,selected=a.id===state.profile.avatar_id;return `<button class="avatar-card ${selected?'selected':''} ${unlocked?'':'locked'}" data-action="select-avatar" data-avatar="${a.id}">${avatarVisual(a.id,'lg')}<small>${a.unlock?`${a.unlock} XP`:'STARTER'}</small><h3>${esc(a.name)}</h3><p>${esc(a.blurb)}</p><i>${selected?'ACTUAL':unlocked?'ELEGIR →':'🔒 BLOQUEADO'}</i></button>`}).join('')}</div></section>`).join('')}`,{world:'home',back:{action:'profile',label:'Profile'}})
 }
-async function selectAvatar(id){const a=avatarById(id);if((state.profile.xp||0)<a.unlock)return toast(`Se desbloquea con ${a.unlock} XP`);state.profile.avatar_id=id;await persistProfile();updatePresence(state.screen);beep('good');toast(`${a.name} seleccionado ✨`,'xp');renderAvatarStudio()}
+async function selectAvatar(id){const a=avatarById(id);if(!QA.active&&(state.profile.xp||0)<a.unlock)return toast(`Se desbloquea con ${a.unlock} XP`);state.profile.avatar_id=id;await persistProfile();updatePresence(state.screen);beep('good');toast(`${a.name} seleccionado ✨`,'xp');renderAvatarStudio()}
 
 // ---------- SKETCH PAD ----------
 function renderSketchPad(){
-  state.screen='sketch';app.innerHTML=shell(`<section class="sketch-page"><div class="sketch-copy"><small>SKETCH PAD · SOCIAL</small><h1>${state.lang==='es'?'Dibuja algo. Lo serio puede esperar.':'Draw something. Serious things can wait.'}</h1><p>${state.lang==='es'?'Haz un garabato, una vaca espacial o cualquier cosa y envíala directamente al chat.':'Make a doodle and send it straight to chat.'}</p></div><div class="sketch-workspace glass-xl"><div class="sketch-toolbar"><label>Color <input id="sketchColor" type="color" value="${state.sketch.color}"></label><label>Grosor <input id="sketchSize" type="range" min="2" max="24" value="${state.sketch.size}"></label><button data-action="sketch-eraser">🧽 Borrador</button><button data-action="sketch-clear">🗑 Limpiar</button></div><div class="canvas-wrap"><canvas id="sketchCanvas" width="1000" height="650"></canvas></div><div class="sketch-actions"><button class="btn-v3 soft" data-action="sketch-save">Guardar PNG</button><button class="btn-v3 primary" data-action="sketch-send">💬 Mira lo que dibujé</button></div></div></section>`,{world:'chill',back:{action:'home',label:'Command Center'}});setTimer(initSketchCanvas,30)
+  state.screen='sketch';app.innerHTML=shell(`<section class="sketch-page"><div class="sketch-copy"><small>SKETCH PAD · SOCIAL</small><h1>${state.lang==='es'?'Dibuja algo. Lo serio puede esperar.':'Draw something. Serious things can wait.'}</h1><p>${state.lang==='es'?'Haz un garabato, una vaca espacial o cualquier cosa y envíala directamente al chat.':'Make a doodle and send it straight to chat.'}</p></div><div class="sketch-workspace glass-xl"><div class="sketch-toolbar"><label>Color <input id="sketchColor" type="color" value="${state.sketch.color}"></label><label>Grosor <input id="sketchSize" type="range" min="2" max="24" value="${state.sketch.size}"></label><button data-action="sketch-eraser">🧽 Borrador</button><button data-action="sketch-clear">🗑 Limpiar</button></div><div class="canvas-wrap"><canvas id="sketchCanvas" width="1000" height="650"></canvas></div><div class="sketch-actions"><button class="btn-v3 soft" data-action="sketch-save">Guardar PNG</button><button class="btn-v3 primary" data-action="sketch-send">💬 Mira lo que dibujé</button></div></div></section>`,{world:'chill',back:{action:'home',label:'Command Center'}});initSketchCanvas()
 }
 function initSketchCanvas(){
   const c=document.querySelector('#sketchCanvas');if(!c)return;const ctx=c.getContext('2d');ctx.lineCap='round';ctx.lineJoin='round';let down=false,last=null
@@ -722,10 +765,11 @@ function initSketchCanvas(){
 function clearSketch(){const c=document.querySelector('#sketchCanvas');c?.getContext('2d').clearRect(0,0,c.width,c.height)}
 function saveSketch(){const c=document.querySelector('#sketchCanvas');if(!c)return;const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download=`koraverse-dibujo-${Date.now()}.png`;a.click()}
 async function sendSketch(){
+  if(QA.active)return toast('Dibujo de prueba: no se publica en QA')
   const c=document.querySelector('#sketchCanvas');if(!c)return;const blob=await new Promise(r=>c.toBlob(r,'image/webp',.82));let url=''
   if(state.dbReady&&blob){try{const path=`${state.profile.player_key}/${Date.now()}-${crypto.randomUUID()}.webp`;const {error}=await supabase.storage.from('koraverse-sketches').upload(path,blob,{contentType:'image/webp',upsert:false});if(!error)url=supabase.storage.from('koraverse-sketches').getPublicUrl(path).data.publicUrl}catch{}}
   const data_url=url?'':c.toDataURL('image/webp',.65)
-  await sendChatMessage(state.lang==='es'?'Mira lo que dibujé 🎨':'Look what I drew 🎨','sketch',{url,data_url});await awardXP(8,'general','Sketch Pad',{silent:true});toast(state.lang==='es'?'Dibujo enviado al chat 🎨':'Drawing sent 🎨','signal');renderHome()
+  const ok=await sendChatMessage(state.lang==='es'?'Mira lo que dibujé 🎨':'Look what I drew 🎨','sketch',{url,data_url});if(!ok)return;await awardXP(8,'general','Sketch Pad',{silent:true});toast(state.lang==='es'?'Dibujo enviado al chat 🎨':'Drawing sent 🎨','signal');renderHome()
 }
 
 // ---------- KORA SIGNAL ----------
@@ -738,6 +782,7 @@ async function setupSignalChannel(){
 }
 
 async function sendSignal(){
+  if(QA.active)return toast('Señal simulada en QA')
   const to=otherDefault(),from=state.profile.player_key,msg=`${state.profile.display_name} quiere jugar contigo.`
   if(state.signalChannel) await state.signalChannel.send({type:'broadcast',event:'signal',payload:{from,to,message:msg,ts:Date.now()}})
   if(state.dbReady) supabase.from('koraverse_signals').insert({from_player:from,to_player:to,message:msg}).then(()=>{})
@@ -748,6 +793,7 @@ async function sendSignal(){
 async function receiveSignal(payload){state.pendingSignal={from_player:payload.from,message:payload.message};beep('signal');toast(payload.message||'Tu cómplice quiere jugar.','signal');showBrowserNotification('KORA SIGNAL',payload.message||'Tu cómplice quiere jugar contigo.');if(state.screen==='home')renderHome()}
 async function checkPendingSignals(){if(!state.dbReady||!state.profile)return;try{const {data}=await supabase.from('koraverse_signals').select('*').eq('to_player',state.profile.player_key).eq('seen',false).order('created_at',{ascending:false}).limit(1);if(data?.[0])state.pendingSignal=data[0]}catch{}}
 async function enableNotifications(){
+  if(QA.active)return toast('Notificaciones desactivadas en QA')
   if(!('Notification'in window))return toast('Este navegador no soporta notificaciones')
   const permission=await Notification.requestPermission()
   if(permission!=='granted')return toast('Permiso no concedido')
@@ -762,19 +808,20 @@ async function enableNotifications(){
   }catch{toast('Alertas activadas; push cerrado requiere configuración VAPID')}
 }
 function urlBase64ToUint8Array(base64String){const padding='='.repeat((4-base64String.length%4)%4);const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(base64);return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)))}
-async function showBrowserNotification(title,body){if(Notification.permission!=='granted')return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'KORA_SIGNAL',title,body})}catch{try{new Notification(title,{body})}catch{}}}
+async function showBrowserNotification(title,body){if(!('Notification' in window)||Notification.permission!=='granted')return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'KORA_SIGNAL',title,body})}catch{try{new Notification(title,{body})}catch{}}}
 
 // ---------- DUO REALTIME ----------
 function roomPlayer(){return {player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',device:deviceId,role:state.room.role}}
 function roomPlayers(){const m=state.room.channel?.presenceState?.()||{};return Object.values(m).flat().map(x=>x)}
 async function connectRoom(role,code){
+  if(QA.active)return toast('Sal de QA para conectar una sala real.')
   if(!supabase)return toast('Supabase no está configurado.')
   let cached=null;try{cached=role==='host'?JSON.parse(localStorage.getItem(`koraverse_v3_host_${code}`)||'null'):null}catch{}
   await leaveRoom(false,{keepHostCache:true});state.room.code=code;state.room.role=role;state.room.game=cached||freshDuoGame();localStorage.setItem(ROOM_KEY,JSON.stringify({code,role}))
   history.replaceState({},'',`${location.pathname}?room=${code}`)
-  const ch=supabase.channel(`koraverse-room-v3-${code}`,{config:{presence:{key:`${state.profile.player_key}:${deviceId}`},broadcast:{self:true}}});state.room.channel=ch
+  const ch=supabase.channel(`koraverse-room-v3-${code}`,{config:{presence:{key:sessionId},broadcast:{self:true}}});state.room.channel=ch
   ch.on('presence',{event:'sync'},()=>{state.room.players=roomPlayers();if(state.screen.startsWith('duo'))renderDuoScreen()})
-    .on('broadcast',{event:'state'},({payload})=>{if(state.room.role!=='host'){state.room.game=payload.game;renderDuoScreen()}})
+    .on('broadcast',{event:'state'},({payload})=>{if(state.room.role!=='host'){state.room.game=payload.game;if(payload.game.chessCheckBy===state.profile.player_key)recordStar('first-check','Tu primer jaque','♟');renderDuoScreen()}})
     .on('broadcast',{event:'need_state'},()=>{if(state.room.role==='host')broadcastGame()})
     .on('broadcast',{event:'action'},({payload})=>onRoomAction(payload))
     .on('broadcast',{event:'trivia_answer'},({payload})=>onTriviaAnswer(payload))
@@ -786,14 +833,14 @@ async function connectRoom(role,code){
     .on('broadcast',{event:'boss_hit'},({payload})=>onDuoBossHit(payload))
     .on('broadcast',{event:'arcade_hit'},()=>{if(state.invaders?.duo){state.invaders.shared++;const el=document.querySelector('#sharedHits');if(el)el.textContent=state.invaders.shared}})
     .on('broadcast',{event:'xp_award'},({payload})=>onXpAward(payload))
-  await new Promise(resolve=>ch.subscribe(async status=>{if(status==='SUBSCRIBED'){state.room.connected=true;await ch.track(roomPlayer());resolve()}}))
+  const ready=await new Promise(resolve=>{const timeout=setTimeout(()=>resolve(false),6000);ch.subscribe(async status=>{if(state.room.channel!==ch)return;if(status==='SUBSCRIBED'){clearTimeout(timeout);state.room.connected=true;await ch.track(roomPlayer());if(role==='guest')sendRoom('need_state',{});resolve(true)}else if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)){state.room.connected=false;clearTimeout(timeout);resolve(false)}})});if(!ready){await leaveRoom(false);toast('No se pudo conectar la sala. Reintenta cuando vuelva la conexión.');return openDuoEntry()}
   state.screen='duo-lobby';if(role==='guest')sendRoom('need_state',{});renderDuoScreen()
 }
 async function leaveRoom(render=true,{keepHostCache=false}={}){const oldCode=state.room.code,oldRole=state.room.role;if(state.room.channel&&supabase)await supabase.removeChannel(state.room.channel);state.room={code:null,role:null,channel:null,players:[],connected:false,game:freshDuoGame()};localStorage.removeItem(ROOM_KEY);if(!keepHostCache&&oldCode&&oldRole==='host')localStorage.removeItem(`koraverse_v3_host_${oldCode}`);history.replaceState({},'',location.pathname);if(render)renderHome()}
 async function sendRoom(event,payload){if(state.room.channel)await state.room.channel.send({type:'broadcast',event,payload:{...payload,player_key:state.profile.player_key,name:state.profile.display_name,ts:Date.now()}})}
 async function grantDuoPlayerXP(players,amount,source){if(state.room.role!=='host')return;for(const target of players)await sendRoom('xp_award',{target,amount,source});await awardDuoXP(Math.max(5,Math.round(amount*.7)))}
 async function onXpAward(p){if(!p||p.target!==state.profile.player_key)return;await awardXP(Number(p.amount||0),'duo',p.source||'Duo Realm',{silent:false})}
-async function broadcastGame(){state.room.game.updatedAt=Date.now();if(state.room.role==='host'&&state.room.code)localStorage.setItem(`koraverse_v3_host_${state.room.code}`,JSON.stringify(state.room.game));await state.room.channel?.send({type:'broadcast',event:'state',payload:{game:state.room.game}});renderDuoScreen()}
+async function broadcastGame(){state.room.game.updatedAt=Date.now();if(!QA.active&&state.room.role==='host'&&state.room.code)localStorage.setItem(`koraverse_v3_host_${state.room.code}`,JSON.stringify(state.room.game));await state.room.channel?.send({type:'broadcast',event:'state',payload:{game:state.room.game}});renderDuoScreen()}
 async function requestDuoAction(action,data={}){if(state.room.role==='host')return applyDuoAction(action,data);sendRoom('action',{action,data})}
 function onRoomAction(p){if(state.room.role==='host'&&p?.action)applyDuoAction(p.action,p.data||{})}
 function activeDuoPlayers(){return [...new Set(state.room.players.map(p=>p.player_key))].slice(0,2)}
@@ -837,7 +884,7 @@ function chessAdvice(game){const moves=game.moves({verbose:true}).sort((a,b)=>ch
 function chessPieceHelp(piece){return {p:'El peón avanza una casilla y captura en diagonal. En su primera jugada puede avanzar dos.',n:'El caballo se mueve en forma de L y puede saltar sobre otras piezas.',b:'El alfil se mueve en diagonal tantas casillas como quiera.',r:'La torre se mueve en línea recta por filas y columnas.',q:'La reina combina los movimientos de torre y alfil.',k:'El rey mueve una casilla en cualquier dirección. Nunca puede quedar en jaque.'}[piece]||''}
 function renderChessLearn(){
   state.screen='duo-chess-learn';const lessons=[['♙','Peón','Avanza hacia delante, captura en diagonal y al llegar al final puede promocionar.'],['♘','Caballo','Se mueve en L. Es la única pieza que puede saltar sobre otras.'],['♗','Alfil','Recorre diagonales y siempre permanece en casillas del mismo color.'],['♖','Torre','Se mueve horizontal o verticalmente.'],['♕','Reina','La pieza más poderosa: combina torre y alfil.'],['♔','Rey','Debe permanecer a salvo. Jaque mate termina la partida.']]
-  app.innerHTML=shell(`<section class="chess-learn"><small>CHESS DUO LAB · APRENDE</small><h1>Ajedrez sin presión.</h1><p>Cinco minutos aquí bastan para entender el tablero antes de retar a tu cómplice.</p><div class="chess-lesson-grid">${lessons.map(([ic,n,d])=>`<article><span>${ic}</span><b>${n}</b><p>${d}</p></article>`).join('')}</div><div class="chess-principles glass"><b>3 ideas que valen oro</b><span>1. Controla el centro.</span><span>2. Saca caballos y alfiles temprano.</span><span>3. Protege tu rey; enrocar suele ayudar.</span></div><button class="btn-v3 primary" data-action="duo-game" data-game="chess">♟️ Practicar en partida</button></section>`,{world:'duo',back:{action:'duo-hub',label:'Duo Realm'}})
+  app.innerHTML=shell(`<section class="chess-learn"><small>CHESS DUO LAB · APRENDE</small><h1>Ajedrez sin presión.</h1><p>Cinco minutos aquí bastan para entender el tablero antes de retar a tu cómplice.</p><div class="chess-lesson-grid">${lessons.map(([ic,n,d])=>`<article><span>${ic}</span><b>${n}</b><p>${d}</p></article>`).join('')}</div><div class="chess-principles glass"><b>3 ideas que valen oro</b><span>1. Controla el centro.</span><span>2. Saca caballos y alfiles temprano.</span><span>3. Protege tu rey; enrocar suele ayudar.</span></div><button class="btn-v3 primary" data-action="${QA.active?'qa-chess':state.room.connected?'duo-game':'chess-duo'}" data-game="chess">♟️ Practicar en partida</button></section>`,{world:'duo',back:{action:'duo-hub',label:'Duo Realm'}})
 }
 function renderChessDuo(){
   const g=state.room.game;const game=new Chess(g.chessFen||undefined);const myColor=chessColorFor(state.profile.player_key)||'w';const guide=chessGuideOn();const selected=state.chess.selected;const legal=selected?game.moves({square:selected,verbose:true}):[];const legalTo=new Set(legal.map(m=>m.to));const rows=game.board();const coords=[];for(let r=0;r<8;r++)for(let c=0;c<8;c++)coords.push({r,c})
@@ -856,7 +903,7 @@ function clickChessSquare(square){
 }
 async function onChessMove(p){
   if(state.room.role!=='host'||state.room.game.mode!=='chess'||p.round!==state.room.game.round)return;const g=state.room.game,game=new Chess(g.chessFen||undefined),color=chessColorFor(p.player_key);if(game.turn()!==color)return
-  try{const mv=game.move({from:p.from,to:p.to,promotion:p.promotion||'q'});if(!mv)return;g.chessFen=game.fen();g.chessHistory=game.history();g.chessLastMove={from:mv.from,to:mv.to};g.chessStatus=game.isCheckmate()?'Jaque mate':game.isDraw()?'Tablas':game.isCheck()?'Jaque':'En juego';if(game.isGameOver()){const players=activeDuoPlayers();if(game.isCheckmate())grantDuoPlayerXP([p.player_key],50,'Chess Duo');grantDuoPlayerXP(players.filter(x=>x!==p.player_key),20,'Chess Duo');awardDuoXP(20)}broadcastGame()}catch{}
+  try{const mv=game.move({from:p.from,to:p.to,promotion:p.promotion||'q'});if(!mv)return;g.chessFen=game.fen();g.chessHistory=[...(g.chessHistory||[]),mv.san];g.chessLastMove={from:mv.from,to:mv.to};g.chessCheckBy=game.isCheck()?p.player_key:null;if(g.chessCheckBy===state.profile.player_key)recordStar('first-check','Tu primer jaque','♟');g.chessStatus=game.isCheckmate()?'Jaque mate':game.isDraw()?'Tablas':game.isCheck()?'Jaque':'En juego';if(game.isGameOver()){const players=activeDuoPlayers();if(game.isCheckmate())grantDuoPlayerXP([p.player_key],50,'Chess Duo');grantDuoPlayerXP(players.filter(x=>x!==p.player_key),20,'Chess Duo');awardDuoXP(20)}broadcastGame()}catch{}
 }
 
 function renderDuoTrivia(){const g=state.room.game,q=g.trivia.q;const mine=g.answers[state.profile.player_key];const result=g.result;app.innerHTML=shell(`<section class="duo-game-head"><button data-action="duo-hub">← Duo Realm</button><span>${g.trivia.cat.toUpperCase()} · RONDA ${g.round}</span><span>${Object.keys(g.answers).length}/2 BLOQUEADAS</span></section><div class="duo-question glass-xl"><small>TRIVIA REALM</small><h1>${esc(q.q)}</h1><div class="trivia-options">${q.a.map((a,i)=>`<button data-action="duo-trivia-answer" data-index="${i}" class="${mine===i?'locked':''} ${result&&q.c===i?'correct':''}"><span>${String.fromCharCode(65+i)}</span>${esc(a)}</button>`).join('')}</div>${mine!=null&&!result?'<div class="answer-lock">🔒 Respuesta bloqueada. Esperando la otra dimensión...</div>':''}${result?`<div class="duo-result"><b>${result.both?'DUO PERFECT ✨':'REVELACIÓN'}</b><p>${result.text}</p><button class="btn-v3 primary" data-action="duo-game" data-game="trivia">Siguiente ronda</button></div>`:''}</div>`,{world:'duo'})}
@@ -886,10 +933,10 @@ app.addEventListener('click',async e=>{
   const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action
   if(a==='choose-profile')return chooseProfile(el.dataset.name)
   if(a==='custom-profile'){const n=document.querySelector('#customName')?.value.trim();if(n)return chooseProfile(n)}
-  if(a==='home')return renderHome()
-  if(a==='world')return renderWorld(el.dataset.world)
-  if(a==='profile')return renderProfile()
-  if(a==='switch-profile'){if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
+  if(a==='home')return travelTo('home')
+  if(a==='world')return travelTo(el.dataset.world)
+  if(a==='profile')return travelTo('profile')
+  if(a==='switch-profile'){if(QA.active)return toast('Sal de QA antes de cambiar de jugador.');clearInterval(socialHeartbeat);if(state.social.channel)await supabase?.removeChannel(state.social.channel);await leaveRoom(false);state.social={channel:null,presence:{},messages:[],open:false,loaded:false,unread:0,typing:null};if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
   if(a==='sound'){state.sound=!state.sound;localStorage.setItem(SOUND_KEY,state.sound?'on':'off');toast(state.sound?'Sonido activado':'Sonido desactivado');return state.screen==='home'?renderHome():null}
   if(a==='language'){state.lang=state.lang==='es'?'en':'es';localStorage.setItem(LANG_KEY,state.lang);if(state.profile){state.profile.language=state.lang;await persistProfile(false)}return rerenderPrimary()}
   if(a==='theme'){const id=el.dataset.theme;if(!THEME_IDS.includes(id))return;state.theme=id;localStorage.setItem(THEME_KEY,id);if(state.profile){state.profile.theme_id=id;await persistProfile(false)}applyTheme();return renderProfile()}
@@ -897,7 +944,7 @@ app.addEventListener('click',async e=>{
   if(a==='quick-play'){const pick=random(['invaders','memory','chaos','sudoku','trivia']);if(pick==='memory')return startMemory();if(pick==='chaos')return startCaos();if(pick==='sudoku')return startSudoku();if(pick==='trivia')return startSoloTrivia('mix');return startInvaders()}
   if(a==='send-signal')return sendSignal()
   if(a==='chat-toggle')return toggleChat()
-  if(a==='chat-send'){const input=document.querySelector('#chatInput');const v=input?.value||'';if(input)input.value='';sendTyping(false);return sendChatMessage(v)}
+  if(a==='chat-send'){const input=document.querySelector('#chatInput');const v=input?.value||'';el.disabled=true;const ok=await sendChatMessage(v);el.disabled=false;if(ok&&input)input.value='';sendTyping(false);return}
   if(a==='chat-clear')return clearChatForMe()
   if(a==='sketch-pad')return renderSketchPad()
   if(a==='sketch-clear')return clearSketch()
@@ -936,13 +983,13 @@ app.addEventListener('click',async e=>{
   if(a==='star-drift')return starDrift()
   if(a==='coffee')return coffeeBreak()
   if(a==='classic-case'||a==='duo-sudoku'||a==='chess-duo')return openDuoEntry()
-  if(a==='duo-entry')return state.room.connected?renderDuoHub():openDuoEntry()
+  if(a==='duo-entry')return travelTo('shared')
   if(a==='create-room')return connectRoom('host',randomCode())
   if(a==='join-room'){const code=(document.querySelector('#joinCode')?.value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);if(code.length!==6)return toast('Introduce un código de 6 caracteres');return connectRoom('guest',code)}
   if(a==='copy-room'){await navigator.clipboard.writeText(`${location.origin}${location.pathname}?room=${state.room.code}`);return toast('Enlace copiado')}
   if(a==='leave-room')return leaveRoom()
   if(a==='duo-start')return requestDuoAction('start')
-  if(a==='duo-hub')return requestDuoAction('hub')
+  if(a==='duo-hub')return state.room.connected||QA.active?requestDuoAction('hub'):openDuoEntry()
   if(a==='new-duo-room'){if(state.room.role!=='host')return toast('Solo el host puede crear una nueva sala.');const old=state.room.code,code=randomCode();await sendRoom('action',{action:'new_room',data:{code}});if(old)localStorage.removeItem(`koraverse_v3_host_${old}`);return connectRoom('host',code)}
   if(a==='duo-game')return requestDuoAction(el.dataset.game)
   if(a==='chess-learn')return renderChessLearn()
@@ -968,7 +1015,159 @@ onRoomAction=function(p){
 }
 
 document.addEventListener('input',e=>{if(e.target?.id==='chatInput'){sendTyping(true)}})
-function toggleDiscreet(){state.discreet=!state.discreet;let el=document.querySelector('#discreetOverlay');if(state.discreet){if(!el){el=document.createElement('div');el.id='discreetOverlay';el.className='discreet-overlay';document.body.appendChild(el)}el.innerHTML=`<div><span class="brand-orb"></span><small>KORAVERSE FOCUS</small><b>${new Date().toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}</b><p>${state.lang==='es'?'Sesión pausada. Ctrl + Espacio para volver.':'Session paused. Ctrl + Space to return.'}</p></div>`;el.classList.add('show')}else el?.classList.remove('show')}
-document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();return toggleDiscreet()}if(e.key==='Enter'&&e.target?.id==='chatInput'){e.preventDefault();const v=e.target.value;e.target.value='';sendTyping(false);sendChatMessage(v)}})
+function toggleDiscreet(){state.discreet=!state.discreet;document.documentElement.dataset.paused=String(document.hidden||state.discreet);ambient.pause(document.hidden||state.discreet);updatePresence();let el=document.querySelector('#discreetOverlay');if(state.discreet){if(!el){el=document.createElement('div');el.id='discreetOverlay';el.className='discreet-overlay';document.body.appendChild(el)}el.innerHTML=`<div><span class="brand-orb"></span><small>KORAVERSE FOCUS</small><b>${new Date().toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}</b><p>${state.lang==='es'?'Sesión pausada. Ctrl + Espacio para volver.':'Session paused. Ctrl + Space to return.'}</p></div>`;el.classList.add('show')}else el?.classList.remove('show')}
+document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();return toggleDiscreet()}if(e.key==='Enter'&&e.target?.id==='chatInput'){e.preventDefault();const input=e.target,v=input.value;sendTyping(false);sendChatMessage(v).then(ok=>{if(ok&&input.value===v)input.value=''})}})
+
+const WORLDS = {
+  refuge:{color:'#8da995',icon:'🌿',es:{name:'El Refugio',line:'Algunas cosas crecen mejor cuando nadie las apura.'},en:{name:'The Refuge',line:'Some things grow better when no one rushes them.'},activities:[['🌷','Garden','garden'],['☕','Coffee Break','coffee'],['🌌','Star Drift','star-drift'],['🌧','Rain Room','rain-room'],['📖','Reading Corner','quiet-library'],['🪐','Órbita de ánimo','mood-orbit'],['✦','Solo tengo un minuto','minute']]},
+  chaos:{color:'#c392ac',icon:'🚀',es:{name:'El Caos',line:'El universo también tiene sentido del humor.'},en:{name:'The Chaos',line:'The universe has a sense of humor, too.'},activities:[['🚀','Case Invaders','case-invaders'],['🧠','Memory Reactor','memory'],['⚡','Caos de 30 segundos','chaos'],['📁','Case Arena · Lic. Urgentísimo','classic-case'],['🎬','Trivia Solo','trivia-hub']]},
+  observatory:{color:'#b5a4cf',icon:'📚',es:{name:'El Observatorio',line:'No tienes que aprenderlo todo hoy. Una palabra también cuenta.'},en:{name:'The Observatory',line:'You do not have to learn everything today. One word counts, too.'},activities:[['🇬🇧','English Lab','english-hub'],['🔢','Sudoku','sudoku'],['♟','Chess Duo + Guíame','chess-duo'],['📖','Aprender ajedrez','chess-learn'],['🎬','Trivia','trivia-hub']]},
+  workshop:{color:'#d7b17b',icon:'🎨',es:{name:'El Taller',line:'Una línea pequeña puede abrir un mundo entero.'},en:{name:'The Workshop',line:'A small line can open an entire world.'},activities:[['🎨','Sketch Pad','sketch-pad'],['✉','Compartir una creación','signals-world'],['🐮','Avatar Studio','avatar-studio']]},
+  shared:{color:'#91b6c7',icon:'🤝',es:{name:'Órbita Compartida',line:'Dos luces encendidas en el mismo lugar.'},en:{name:'Shared Orbit',line:'Two lights glowing in the same place.'},activities:[['✨','Entrar a una sala Duo','duo-entry-real'],['☕','Coffee Signals','coffee'],['♟','Chess Duo','chess-duo'],['🧩','Sudoku Duo','duo-sudoku'],['🎬','Trivia Duo · Same Brain · Mission Control','duo-entry-real']]},
+  signals:{color:'#d4aaa4',icon:'✉',es:{name:'Señales',line:'Hay palabras que encuentran su camino, incluso entre mundos.'},en:{name:'Signals',line:'Some words find their way, even between worlds.'},activities:[['✉','Abrir Señales','chat-toggle'],['☕','Una señal cálida','coffee-invite'],['✨','¿Jugamos?','send-signal'],['🎨','Dejar un dibujo en su órbita','sketch-pad']]}
+}
+const word = (es,en) => state.lang==='es'?es:en
+const quality = localStorage.getItem('koraverse_v5_quality') || 'balanced'
+document.documentElement.dataset.quality=quality
+document.documentElement.dataset.paused=String(document.hidden)
+
+function planetScene(id='refuge',size='full'){
+  const w=WORLDS[id]||WORLDS.refuge
+  return `<div class="planet-scene ${size} scene-${id}" style="--planet:${w.color}" aria-hidden="true"><span class="scene-moon"></span><div class="scene-ring"></div><div class="scene-sphere"><span class="scene-land"></span><span class="scene-house">${w.icon}</span></div><div class="scene-inhabitant">${avatarVisual(state.profile?.avatar_id||'cow-reader','full')}</div><span class="scene-satellite">✦</span></div>`
+}
+function planetMap(){return `<section class="planet-map" aria-label="${word('Explorar mundos','Explore worlds')}">${Object.entries(WORLDS).map(([id,w])=>`<button class="planet-destination" data-action="planet" data-planet="${id}" style="--planet:${w.color}"><span class="mini-planet"><i>${w.icon}</i></span><h3>${w[state.lang].name}</h3><p>${w[state.lang].line}</p><span class="travel-label">${word('Viajar','Travel')} ↗</span></button>`).join('')}</section>`}
+function renderUniverseHome(){
+  state.screen='home';clearTimers()
+  app.innerHTML=shell(`<section class="arrival"><div class="arrival-copy"><small>${word('UN LUGAR ENTRE MUNDOS','A PLACE BETWEEN WORLDS')}</small><h1>${word('Hola','Hello')},<br><em>${esc(state.profile.display_name)}.</em></h1><p id="arrivalPresence">${partnerIsOnline()?word('Hay otra luz encendida.','Another light is glowing.')+' '+esc(partnerLabel())+word(' está aquí.',' is here.'):word('Hoy llegaste primero. El universo también sabe esperar.','You arrived first today. The universe knows how to wait, too.')}</p><p class="arrival-poem">${word('Puedes dejar el día en la puerta.<br>Todo lo demás puede esperar un poquito.','You can leave the day at the door.<br>Everything else can wait a little.')}</p><button class="quiet-link" data-action="minute">✦ ${word('Solo tengo un minuto','I only have a minute')}</button></div>${planetScene('refuge')}</section><section class="intentions"><small>${word('SIN PRISA, SIN OBLIGACIONES','NO RUSH, NO OBLIGATIONS')}</small><h2>${word('¿Qué necesitas hoy?','What do you need today?')}</h2><div class="intention-row">${[['🌿','Descansar','Rest','refuge'],['🚀','Distraerme','Play','chaos'],['📚','Aprender','Learn','observatory'],['🎨','Crear','Create','workshop']].map(([icon,es,en,id])=>`<button data-action="planet" data-planet="${id}"><span>${icon}</span>${word(es,en)}</button>`).join('')}<button data-action="surprise"><span>✦</span>${word('Sorpréndeme','Surprise me')}</button></div></section><div class="section-title"><div><small>${word('SIGUE UNA ÓRBITA','FOLLOW AN ORBIT')}</small><h2>${word('Hay un mundo para este momento.','A world for this moment.')}</h2></div><button class="quiet-link" data-action="profile">${word('Mi constelación','My constellation')} ↗</button></div>${planetMap()}`,{world:'home'})
+  loadStars()
+}
+function renderPlanet(id){
+  const w=WORLDS[id];if(!w)return renderHome()
+  state.screen=id;clearTimers()
+  app.innerHTML=shell(`<section class="planet-arrival"><div><small>${word('HAS LLEGADO A','YOU HAVE ARRIVED AT')}</small><h1>${w[state.lang].name}</h1><p>${w[state.lang].line}</p>${id==='shared'?`<p>${partnerIsOnline()?word('Tu cómplice está cerca.','Your companion is nearby.'):word('Puedes dejar una invitación mientras llega.','Leave an invitation while they arrive.')}</p>`:''}</div>${planetScene(id)}</section><div class="activity-grid">${w.activities.map(([icon,title,action])=>`<button class="activity-card" data-action="${action}"><span>${icon}</span><h3>${title}</h3><p>${word('Un pequeño lugar para quedarte un rato.','A small place to stay awhile.')}</p><b>${word('ENTRAR','ENTER')} ↗</b></button>`).join('')}</div>${id==='signals'?`<p class="connection-note" id="connectionNote">${socialConnectionLabel()}</p>`:''}`,{world:id,back:{action:'home',label:word('Entre mundos','Between worlds')}})
+}
+async function travelTo(id){
+  if(traveling)return
+  traveling=true
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches||document.documentElement.dataset.quality==='low'
+  if(!reduce){const el=document.createElement('div');el.className='travel-overlay';el.setAttribute('role','status');el.innerHTML=`<div class="travel-stars"></div><span class="travel-ship">🚀</span><p>${word('Siguiendo una nueva órbita…','Following a new orbit…')}</p><b>${esc(WORLDS[id]?.[state.lang].name||word('Entre mundos','Between worlds'))}</b>`;document.body.appendChild(el);await new Promise(r=>setTimeout(r,innerWidth<600?650:1100));el.remove()}
+  traveling=false
+  if(id==='home')renderHome();else if(id==='profile')renderProfile();else renderWorld(id)
+  window.scrollTo({top:0,behavior:'instant'})
+}
+function socialConnectionLabel(){return QA.active?'QA · '+word('señales simuladas','simulated signals'):!configured?word('Conecta Supabase para cruzar señales entre navegadores.','Connect Supabase to send signals between browsers.'):state.social.error||word(state.social.connected?'Señales conectadas · historial persistente':'Conectando Señales…',state.social.connected?'Signals connected · persistent history':'Connecting Signals…')}
+function presenceDescription(pp){
+  if(pp)return (pp.status==='idle'?word('En pausa','Idle'):tr('online'))+' · '+(WORLDS[pp.current_world||pp.screen]?.[state.lang].name||word('Entre mundos','Between worlds'))
+  const last=state.profiles.find(p=>p.player_key===otherDefault())?.last_seen
+  return tr('offline')+(last?' · '+word('última visita ','last visit ')+new Date(last).toLocaleString(state.lang==='es'?'es-DO':'en-US',{dateStyle:'short',timeStyle:'short'}):'')
+}
+const originalRefreshSocial=refreshSocialDock
+refreshSocialDock=function(){
+  originalRefreshSocial()
+  const pp=partnerPresence()
+  const text=document.querySelector('#socialPresenceText');if(text)text.innerHTML=`<i class="presence-dot ${pp?'on':''}"></i>${esc(presenceDescription(pp))}`
+  const pill=document.querySelector('.presence-pill');if(pill){pill.classList.toggle('on',Boolean(pp));pill.title=presenceDescription(pp)}
+  const note=document.querySelector('#connectionNote');if(note)note.textContent=socialConnectionLabel();const chatNote=document.querySelector('#chatConnection');if(chatNote)chatNote.textContent=socialConnectionLabel()
+  const intro=document.querySelector('#arrivalPresence');if(intro)intro.textContent=pp?word('Hay otra luz encendida. ','Another light is glowing. ')+partnerLabel()+word(' está aquí.',' is here.'):word('Hoy llegaste primero. El universo también sabe esperar.','You arrived first today. The universe knows how to wait, too.')
+}
+function renderMinute(){
+  clearTimers();state.screen='minute';state.minuteStart=Date.now()
+  app.innerHTML=shell(`<section class="one-minute"><small>${word('SOLO UN MINUTO','JUST ONE MINUTE')}</small><div class="breathing-orbit"><span>✦</span></div><h1 id="minuteText">${word('Mira la estrella que se mueve.','Watch the moving star.')}</h1><p>${word('No tienes que hacer nada con ella.','You do not have to do anything with it.')}</p><button class="quiet-link" data-action="home">${word('Volver cuando quiera','Return whenever I want')} ↗</button></section>`,{world:'refuge'})
+  setTimer(()=>{const t=document.querySelector('#minuteText');if(t)t.textContent=word('Tampoco tienes que resolver todo hoy.','You do not have to solve everything today, either.')},18000)
+  setTimer(()=>{const t=document.querySelector('#minuteText');if(t)t.textContent=word('Puedes quedarte. Este momento es tuyo.','You can stay. This moment is yours.')},45000)
+}
+function starStorage(){return 'koraverse_v5_stars_'+state.profile.player_key}
+function localStars(){try{return JSON.parse(localStorage.getItem(starStorage())||'[]')}catch{return []}}
+async function loadStars(){
+  if(!state.profile)return
+  if(QA.active){state.stars=QA.stars||[];return}
+  state.stars=localStars()
+  if(state.dbReady){const {data}=await supabase.from('koraverse_constellations').select('*').eq('player_key',state.profile.player_key).order('created_at');if(data){const map=new Map(state.stars.map(x=>[x.event_key,x]));data.forEach(x=>map.set(x.event_key,x));state.stars=[...map.values()];localStorage.setItem(starStorage(),JSON.stringify(state.stars))}}
+  recordStar('first-visit','Tu primera luz','✦')
+  if(state.profile.streak>=7)recordStar('seven-days','Siete días bajo este cielo','☾')
+}
+async function recordStar(key,label,icon='✦'){
+  if(!state.profile||QA.active)return
+  const stars=localStars();if(stars.some(x=>x.event_key===key))return
+  const row={player_key:state.profile.player_key,event_key:key,label,icon,created_at:new Date().toISOString()}
+  stars.push(row);state.stars=stars;localStorage.setItem(starStorage(),JSON.stringify(stars))
+  if(state.dbReady)await supabase.from('koraverse_constellations').upsert(row,{onConflict:'player_key,event_key'})
+}
+function constellationMarkup(){
+  const stars=(QA.active?QA.stars:state.stars||localStars())||[]
+  const coords=stars.map((s,i)=>({x:12+(i%5)*18,y:25+((i*37)%48)}))
+  return `<section class="constellation"><small>${word('TU CONSTELACIÓN','YOUR CONSTELLATION')}</small><h2>${word('Lo vivido también ilumina.','What you have lived shines, too.')}</h2><div class="constellation-sky"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${coords.slice(1).map((p,i)=>`<line x1="${coords[i].x}" y1="${coords[i].y}" x2="${p.x}" y2="${p.y}"/>`).join('')}</svg>${stars.map((s,i)=>`<button class="memory-star" style="left:${coords[i].x}%;top:${coords[i].y}%" data-action="memory-star" data-label="${esc(s.label)}" aria-label="${esc(s.label)}"><span>${esc(s.icon)}</span></button>`).join('')}</div><ul class="star-history">${stars.map(s=>`<li><span>${esc(s.icon)}</span>${esc(s.label)}<time>${new Date(s.created_at).toLocaleDateString(state.lang==='es'?'es-DO':'en-US')}</time></li>`).join('')||`<li>${word('Tu historia empieza con una pequeña luz.','Your story begins with a little light.')}</li>`}</ul></section>`
+}
+function renderSettings(){
+  clearTimers();state.screen='settings'
+  app.innerHTML=shell(`<section class="preferences"><small>${word('A TU RITMO','AT YOUR PACE')}</small><h1>${word('Un cielo a tu medida.','A sky of your own.')}</h1><div class="settings-grid"><article class="glass"><h2>${word('Ambiente espacial','Space ambience')}</h2><p>${word('Sonido original y suave. Tú decides cuándo empieza.','Soft, original sound. You decide when it begins.')}</p><button class="btn-v3 soft" data-action="ambient-toggle">${ambient.enabled?word('Silenciar','Mute'):word('Escuchar','Listen')}</button><label>${word('Volumen','Volume')}<input id="ambientVolume" type="range" min="0" max="100" value="${ambient.volume*100}"></label></article><article class="glass"><h2>${word('Movimiento','Motion')}</h2><label>${word('Calidad visual','Visual quality')}<select id="visualQuality"><option value="low">${word('Calma · movimiento mínimo','Calm · minimal motion')}</option><option value="balanced">${word('Equilibrada','Balanced')}</option><option value="high">${word('Completa','Full')}</option></select></label><button class="btn-v3 soft" data-action="discreet">${word('Modo discreto · Ctrl + Espacio','Discreet mode · Ctrl + Space')}</button></article><article class="glass"><h2>QA / Admin</h2><p>${word('Un laboratorio separado para probar tu universo.','A separate laboratory to test your universe.')}</p><button class="btn-v3 soft" data-action="qa">${word('Abrir laboratorio','Open laboratory')}</button></article></div></section>`,{world:'home',back:{action:'home',label:'Entre mundos'}})
+  document.querySelector('#visualQuality').value=document.documentElement.dataset.quality
+}
+function renderQA(){
+  state.screen='qa';clearTimers()
+  app.innerHTML=shell(`<section class="preferences"><small>QA / ADMIN</small><h1>${QA.active?'Laboratorio de prueba':'Acceso al laboratorio'}</h1>${QA.active?`<p>Los cambios de esta sesión no se guardan ni se envían a otras personas.</p><label>XP de prueba <input id="qaXP" type="number" min="0" max="1000000" value="${state.profile.xp}"></label><button class="btn-v3 soft" data-action="qa-xp">Aplicar XP</button><label>Presencia simulada<select id="qaPresence"><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option></select></label><button class="btn-v3 soft" data-action="qa-presence">Aplicar estado</button><div class="hero-buttons"><button class="btn-v3 soft" data-action="qa-chess">Probar ajedrez + Guíame</button><button class="btn-v3 soft" data-action="qa-duo">Probar módulos Duo</button><button class="btn-v3 soft" data-action="avatar-studio">Todos los avatares</button><button class="btn-v3 soft" data-action="qa-reset">Reiniciar prueba</button><button class="btn-v3 primary" data-action="qa-exit">Salir y restaurar</button></div>${planetMap()}`:`<p>Inicia sesión con tu cuenta autorizada de Supabase Auth.</p><label>Email<input id="qaEmail" type="email" autocomplete="username"></label><label>Contraseña<input id="qaPassword" type="password" autocomplete="current-password"></label><button class="btn-v3 primary" data-action="qa-login">Entrar en QA</button><p id="qaStatus" role="status"></p>`}</section>`,{world:'home',back:{action:'settings',label:'Preferencias'}})
+}
+async function loginQA(){
+  const status=document.querySelector('#qaStatus');if(!supabase){status.textContent='Supabase no está configurado.';return}
+  const {error}=await supabase.auth.signInWithPassword({email:document.querySelector('#qaEmail').value.trim(),password:document.querySelector('#qaPassword').value})
+  if(error){status.textContent='No se pudo iniciar sesión.';return}
+  const {data,error:roleError}=await supabase.rpc('koraverse_is_admin')
+  if(roleError||data!==true){await supabase.auth.signOut();status.textContent='Esta cuenta no está autorizada para QA.';return}
+  await leaveRoom(false)
+  if(state.social.channel)await supabase.removeChannel(state.social.channel)
+  if(state.signalChannel)await supabase.removeChannel(state.signalChannel)
+  clearInterval(socialHeartbeat)
+  QA.original=structuredClone(state.profile);QA.duo=structuredClone(state.duoStats);QA.social=state.social;QA.room=state.room;QA.active=true
+  state.profile={...state.profile,xp:50000};state.social={messages:[],presence:{},open:false,loaded:true,unread:0};QA.stars=[{event_key:'qa',label:'Una estrella de prueba',icon:'✦',created_at:new Date().toISOString()}];QA.presence={player_key:otherDefault(),status:'online',current_world:'refuge'};renderQA()
+}
+async function exitQA(){
+  if(!QA.active)return
+  state.profile=QA.original;state.duoStats=QA.duo;state.room=QA.room;state.social={...QA.social,channel:null,presence:{},fallback:[],connected:false};QA.active=false
+  await supabase.auth.signOut();await setupSignalChannel();await setupSocialLayer();renderHome()
+}
+function qaDuo(mode='chess'){
+  state.room={code:'QA',role:'host',channel:null,connected:false,players:[{player_key:state.profile.player_key,name:state.profile.display_name,role:'host'},{player_key:otherDefault(),name:partnerLabel(),role:'guest'}],game:freshDuoGame()}
+  state.room.game.gardenUnlocked=true;state.chess.guide=true
+  if(mode==='hub'){state.room.game.screen='hub';renderDuoHub()}else applyDuoAction(mode,{})
+}
+const originalSendRoom=sendRoom
+sendRoom=async function(event,payload){if(!QA.active)return originalSendRoom(event,payload);const p={...payload,player_key:state.profile.player_key};if(event==='chess_move')p.player_key=new Chess(state.room.game.chessFen).turn()==='w'?state.room.game.chessWhite:state.room.game.chessBlack;const handler={chess_move:onChessMove,trivia_answer:onTriviaAnswer,brain_answer:onBrainAnswer,mission_validate:onMissionValidate,sudoku_cell:onDuoSudokuCell,case_hit:onDuoCaseHit,boss_hit:onDuoBossHit,xp_award:onXpAward,action:onRoomAction}[event];if(handler)await handler(p);if(['trivia_answer','brain_answer'].includes(event)){p.player_key=otherDefault();await handler(p)}}
+const originalChessClick=clickChessSquare
+clickChessSquare=function(square){if(!QA.active)return originalChessClick(square);const g=state.room.game,game=new Chess(g.chessFen),piece=game.get(square);if(piece?.color===game.turn()){state.chess.selected=square;renderChessDuo();return}if(state.chess.selected){sendRoom('chess_move',{round:g.round,from:state.chess.selected,to:square,promotion:'q'});state.chess.selected=null}}
+app.addEventListener('click',async e=>{
+  const el=e.target.closest('[data-action]');if(!el)return
+  const a=el.dataset.action
+  if(a==='world-menu'){const nav=document.querySelector('.topnav');nav.classList.toggle('expanded');el.setAttribute('aria-expanded',String(nav.classList.contains('expanded')));return}
+  if(a==='coffee-accept'){const ok=await sendChatMessage(word('Sí, vamos por ese café ☕','Yes, let’s have that coffee ☕'),'coffee_reply',{reply_to:el.dataset.id});if(ok)recordStar('coffee-accepted','Un café compartido','☕');return}
+  if(a==='planet')return travelTo(el.dataset.planet)
+  if(a==='surprise')return travelTo(random(Object.keys(WORLDS)))
+  if(a==='minute')return renderMinute()
+  if(a==='english-hub')return renderEnglishHub()
+  if(a==='trivia-hub')return renderTriviaHub()
+  if(a==='signals-world')return travelTo('signals')
+  if(a==='duo-entry-real')return QA.active?qaDuo('hub'):state.room.connected?renderDuoHub():openDuoEntry()
+  if(a==='settings')return renderSettings()
+  if(a==='discreet')return toggleDiscreet()
+  if(a==='ambient-toggle'){await ambient.toggle();return renderSettings()}
+  if(a==='memory-star')return toast(el.dataset.label)
+  if(a==='qa')return renderQA()
+  if(a==='qa-login')return loginQA()
+  if(a==='qa-exit')return exitQA()
+  if(a==='qa-xp'&&QA.active){state.profile.xp=clamp(Number(document.querySelector('#qaXP').value)||0,0,1000000);return renderQA()}
+  if(a==='qa-presence'&&QA.active){const status=document.querySelector('#qaPresence').value;QA.presence=status==='offline'?null:{player_key:otherDefault(),status,current_world:'refuge'};refreshSocialDock();return toast('Estado de prueba aplicado')}
+  if(a==='qa-reset'&&QA.active){state.profile={...QA.original,xp:50000};state.duoStats={...QA.duo};QA.stars=[];state.social.messages=[];return renderQA()}
+  if(a==='qa-chess'&&QA.active)return qaDuo()
+  if(a==='qa-duo'&&QA.active)return qaDuo('hub')
+})
+document.addEventListener('input',e=>{
+  if(e.target.id==='ambientVolume')ambient.setVolume(Number(e.target.value)/100)
+  if(e.target.id==='visualQuality'){document.documentElement.dataset.quality=e.target.value;localStorage.setItem('koraverse_v5_quality',e.target.value)}
+})
+document.addEventListener('pointerdown',()=>{lastInteraction=Date.now();ambient.activate().catch(()=>{})},{passive:true})
+document.addEventListener('keydown',()=>{lastInteraction=Date.now()})
+let pauseStarted=null
+document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String(document.hidden||state.discreet);ambient.pause(document.hidden||state.discreet);if(document.hidden){pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true)}updatePresence()})
+window.addEventListener('online',()=>{if(state.profile&&!QA.active)setupSocialLayer()})
+window.addEventListener('pagehide',()=>state.social.channel?.untrack())
 
 init()

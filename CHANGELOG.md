@@ -1,3 +1,11 @@
+# 5.0.0 — A Place Between Worlds
+
+- Mundos dedicados, necesidades del día, escenas habitadas y viaje de nave.
+- Chat DB-first + INSERT Realtime + deduplicación + recuperación; Presence por pestaña con respaldo.
+- Constelaciones, ambiente Web Audio, calidad visual, modo discreto, un minuto sin XP.
+- QA autorizado por Supabase Auth y aislado del progreso.
+- Tipografía fluida, navegación móvil, pruebas de ajedrez y seguridad funcional de QA.
+
 # KORAVERSE 4.1 — Premium Polish & Social Expansion
 
 ## Nuevo

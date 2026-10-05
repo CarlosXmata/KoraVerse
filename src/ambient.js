@@ -1,0 +1,8 @@
+export class Ambient {
+  constructor(){this.enabled=localStorage.getItem('koraverse_v5_ambient')==='on';this.volume=Number(localStorage.getItem('koraverse_v5_volume')??.18);this.ctx=null;this.nodes=[]}
+  async activate(){if(!this.enabled)return;if(!this.ctx)this.create();await this.ctx.resume();this.gain.gain.setTargetAtTime(this.volume*.08,this.ctx.currentTime,.6)}
+  async toggle(){this.enabled=!this.enabled;localStorage.setItem('koraverse_v5_ambient',this.enabled?'on':'off');if(this.enabled){if(!this.ctx)this.create();await this.ctx.resume();this.gain.gain.setTargetAtTime(this.volume*.08,this.ctx.currentTime,.6)}else if(this.ctx)this.gain.gain.setTargetAtTime(0,this.ctx.currentTime,.3)}
+  create(){this.ctx=new (window.AudioContext||window.webkitAudioContext)();this.gain=this.ctx.createGain();this.gain.gain.value=0;this.gain.connect(this.ctx.destination);[130.81,196,261.63,329.63].forEach((freq,i)=>{const osc=this.ctx.createOscillator(),voice=this.ctx.createGain(),lfo=this.ctx.createOscillator(),depth=this.ctx.createGain();osc.type='sine';osc.frequency.value=freq;voice.gain.value=.16;lfo.frequency.value=.035+i*.012;depth.gain.value=.07;lfo.connect(depth);depth.connect(voice.gain);osc.connect(voice);voice.connect(this.gain);osc.start();lfo.start();this.nodes.push(osc,lfo)})}
+  setVolume(v){this.volume=Math.max(0,Math.min(1,v));localStorage.setItem('koraverse_v5_volume',this.volume);if(this.ctx)this.gain.gain.setTargetAtTime(this.enabled?this.volume*.08:0,this.ctx.currentTime,.25)}
+  pause(paused){if(!this.ctx)return;if(paused)this.ctx.suspend();else if(this.enabled)this.ctx.resume()}
+}
