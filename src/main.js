@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import './style.css'
 import {
   triviaBank, sameBrain, missions, gardenQuotes, englishCurriculum,
-  bundledEnglishExercises, sudokuPuzzles, memoryIcons, achievements
+  bundledEnglishExercises, sudokuPuzzles, memoryIcons, achievements,
+  avatarCatalog, coffeeActions, quietLibrary
 } from './data.js'
 
 const app = document.querySelector('#app')
@@ -44,6 +45,9 @@ const state = {
   invaders: null,
   sound: localStorage.getItem(SOUND_KEY) !== 'off',
   pendingSignal: null,
+  social: { channel:null, presence:{}, messages:[], open:false, loaded:false, unread:0 },
+  soloTrivia: { category:null, queue:[], index:0, score:0, streak:0, answered:false, selected:null },
+  mood: null,
   timers: new Set(),
   raf: null,
 }
@@ -70,6 +74,17 @@ const levelFloor = level => 120 * (level-1) * (level-1)
 const levelCeil = level => 120 * level * level
 const profileKey = name => name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'player'
 const otherDefault = () => state.profile?.player_key === 'carlos' ? 'kora' : 'carlos'
+
+const avatarById = id => avatarCatalog.find(a=>a.id===id) || avatarCatalog[0]
+function avatarVisual(id, size='md'){
+  const a=avatarById(id)
+  return `<span class="avatar-visual ${size}" style="--avatar-accent:${a.accent}"><span class="avatar-emoji">${a.icon}</span><span class="avatar-badge">${a.badge}</span></span>`
+}
+function socialPresenceList(){return Object.values(state.social.presence||{}).flat()}
+function partnerPresence(){const key=otherDefault();return socialPresenceList().find(x=>x.player_key===key)}
+function partnerIsOnline(){return Boolean(partnerPresence())}
+function partnerLabel(){const key=otherDefault();return state.profiles.find(p=>p.player_key===key)?.display_name || (key==='kora'?'Kora':'Carlos')}
+function formatClock(v){try{return new Date(v).toLocaleTimeString('es-DO',{hour:'2-digit',minute:'2-digit'})}catch{return ''}}
 
 function setTimer(fn, ms) { const id=setTimeout(()=>{state.timers.delete(id);fn()},ms);state.timers.add(id);return id }
 function clearTimers(){ for(const id of state.timers) clearTimeout(id); state.timers.clear(); if(state.raf) cancelAnimationFrame(state.raf); state.raf=null }
@@ -113,13 +128,101 @@ function profileMini(){
   if(!state.profile) return ''
   const p=xpProgress();
   return `<button class="profile-mini" data-action="profile">
-    <span class="mini-avatar">${esc(state.profile.display_name.slice(0,1).toUpperCase())}</span>
+    ${avatarVisual(state.profile.avatar_id,'xs')}
     <span><b>${esc(state.profile.display_name)}</b><small>Lv. ${p.level} · ${state.profile.xp||0} XP</small></span>
   </button>`
 }
 
+function renderChatMessages(){
+  const me=state.profile?.player_key
+  const list=(state.social.messages||[]).slice(-60)
+  if(!list.length) return `<div class="chat-empty"><span>✦</span><b>Quiet dimension.</b><p>Escribe algo o manda una invitación rápida.</p></div>`
+  return list.map(m=>{
+    const mine=m.from_player===me
+    const special=m.kind&&m.kind!=='text'
+    return `<div class="chat-message ${mine?'mine':'theirs'} ${special?'special':''}">
+      <div class="chat-bubble">${special?`<small>${m.kind==='coffee_invite'?'COFFEE SIGNAL':'KORA SIGNAL'}</small>`:''}<p>${esc(m.body)}</p><time>${formatClock(m.created_at||Date.now())}</time></div>
+    </div>`
+  }).join('')
+}
+function socialDockMarkup(){
+  if(!state.profile)return ''
+  const pp=partnerPresence(), online=Boolean(pp), label=partnerLabel(), av=state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||pp?.avatar_id||'cow-classic'
+  return `<button class="social-fab ${online?'online':''}" data-action="chat-toggle" title="KORAVERSE Chat">
+    <span>💬</span>${state.social.unread?`<i>${Math.min(9,state.social.unread)}</i>`:''}
+  </button>
+  <aside id="socialPanel" class="social-panel ${state.social.open?'open':''}">
+    <div class="social-head">
+      <div class="social-person">${avatarVisual(av,'sm')}<div><b>${esc(label)}</b><small id="socialPresenceText"><i class="presence-dot ${online?'on':''}"></i>${online?`Online${pp?.screen?` · ${esc(pp.screen)}`:''}`:'Offline'}</small></div></div>
+      <button data-action="chat-toggle">×</button>
+    </div>
+    <div class="social-quick">
+      <button data-action="send-signal">✨ ¿Jugamos?</button>
+      <button data-action="coffee-invite" data-coffee="coffee">☕ Café</button>
+      <button data-action="quick-chat" data-message="¿Sudoku? 🧩">🧩 Sudoku</button>
+    </div>
+    <div class="social-messages" id="socialMessages">${renderChatMessages()}</div>
+    <div class="chat-compose"><input id="chatInput" maxlength="240" placeholder="Escribe un mensaje…"><button data-action="chat-send">↑</button></div>
+  </aside>`
+}
+function refreshSocialDock(){
+  const panel=document.querySelector('#socialPanel'), pp=partnerPresence(), label=partnerLabel()
+  const presence=document.querySelector('#socialPresenceText')
+  if(presence) presence.innerHTML=`<i class="presence-dot ${pp?'on':''}"></i>${pp?`Online${pp.screen?` · ${esc(pp.screen)}`:''}`:'Offline'}`
+  const msgs=document.querySelector('#socialMessages'); if(msgs){msgs.innerHTML=renderChatMessages();msgs.scrollTop=msgs.scrollHeight}
+  const fab=document.querySelector('.social-fab');if(fab){fab.classList.toggle('online',Boolean(pp));const old=fab.querySelector('i');if(old)old.remove();if(state.social.unread){const i=document.createElement('i');i.textContent=Math.min(9,state.social.unread);fab.appendChild(i)}}
+}
+function updatePresence(screen=state.screen){
+  if(!state.social.channel||!state.profile)return
+  state.social.channel.track({player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',screen,at:Date.now()}).catch(()=>{})
+}
+async function loadChatMessages(){
+  if(state.social.loaded||!state.profile)return
+  state.social.loaded=true
+  if(!state.dbReady)return
+  try{
+    const {data}=await supabase.from('koraverse_messages').select('*').order('created_at',{ascending:false}).limit(100)
+    const me=state.profile.player_key, other=otherDefault()
+    state.social.messages=(data||[]).filter(m=>(m.from_player===me&&m.to_player===other)||(m.from_player===other&&m.to_player===me)).reverse()
+  }catch{}
+}
+function receiveChatMessage(msg){
+  if(!msg||!state.profile)return
+  const me=state.profile.player_key, other=otherDefault()
+  if(!((msg.from_player===me&&msg.to_player===other)||(msg.from_player===other&&msg.to_player===me)))return
+  if(msg.id&&state.social.messages.some(x=>x.id===msg.id))return
+  state.social.messages.push(msg)
+  if(msg.from_player!==me&&!state.social.open){state.social.unread++;toast(msg.kind==='coffee_invite'?msg.body:`${partnerLabel()}: ${msg.body}`,'signal');beep('signal')}
+  refreshSocialDock()
+}
+async function setupSocialLayer(){
+  if(!supabase||!state.profile)return
+  if(state.social.channel)await supabase.removeChannel(state.social.channel)
+  state.social.loaded=false
+  const ch=supabase.channel('koraverse-social-v4',{config:{presence:{key:`${state.profile.player_key}:${deviceId}`},broadcast:{self:false}}})
+  state.social.channel=ch
+  ch.on('presence',{event:'sync'},()=>{state.social.presence=ch.presenceState()||{};refreshSocialDock()})
+    .on('broadcast',{event:'chat_message'},({payload})=>receiveChatMessage(payload))
+  await new Promise(resolve=>ch.subscribe(async status=>{if(status==='SUBSCRIBED'){await updatePresence(state.screen);resolve()}}))
+  await loadChatMessages();refreshSocialDock()
+}
+async function sendChatMessage(body,kind='text',metadata={}){
+  body=String(body||'').trim();if(!body||!state.profile)return
+  const row={from_player:state.profile.player_key,to_player:otherDefault(),body,kind,metadata,created_at:new Date().toISOString()}
+  let saved=row
+  if(state.dbReady){try{const {data}=await supabase.from('koraverse_messages').insert(row).select().single();if(data)saved=data}catch{}}
+  receiveChatMessage(saved)
+  await state.social.channel?.send({type:'broadcast',event:'chat_message',payload:saved})
+}
+async function toggleChat(){
+  await loadChatMessages();state.social.open=!state.social.open;if(state.social.open)state.social.unread=0
+  const p=document.querySelector('#socialPanel');if(p)p.classList.toggle('open',state.social.open)
+  refreshSocialDock();if(state.social.open)setTimer(()=>document.querySelector('#chatInput')?.focus(),120)
+}
+
 function shell(content,{world='home',back=null}={}){
   const connected=state.room.connected && state.room.code
+  updatePresence(world)
   return `${starsMarkup()}<div id="toast" class="toast"></div>
   <div class="app-shell world-${world}">
     <header class="topbar-v3">
@@ -127,12 +230,15 @@ function shell(content,{world='home',back=null}={}){
       <nav class="topnav">
         <button data-action="world" data-world="arcade">Arcade</button>
         <button data-action="world" data-world="puzzles">Puzzle Lab</button>
+        <button data-action="world" data-world="trivia">Trivia</button>
         <button data-action="world" data-world="english">English Lab</button>
         <button data-action="duo-entry">Duo Realm</button>
         <button data-action="world" data-world="chill">Chill</button>
       </nav>
       <div class="top-actions">
         ${connected?`<span class="live-pill"><i></i>${state.room.code}</span>`:''}
+        <span class="presence-pill ${partnerIsOnline()?'on':''}"><i></i>${esc(partnerLabel())}</span>
+        <button class="icon-btn chat-top" data-action="chat-toggle" title="Mensajes">💬${state.social.unread?`<b>${Math.min(9,state.social.unread)}</b>`:''}</button>
         <button class="icon-btn" data-action="sound" title="Sonido">${state.sound?'🔊':'🔇'}</button>
         ${profileMini()}
       </div>
@@ -141,6 +247,7 @@ function shell(content,{world='home',back=null}={}){
       ${back?`<button class="back-v3" data-action="${back.action}" ${back.world?`data-world="${back.world}"`:''}>← ${back.label}</button>`:''}
       ${content}
     </main>
+    ${socialDockMarkup()}
     <button class="kora-orb" data-action="kora-tip"><span>🐮</span><i></i></button>
   </div>`
 }
@@ -150,7 +257,7 @@ async function init(){
   const saved=localStorage.getItem(PROFILE_KEY)
   if(saved){ try{ state.profile=JSON.parse(saved) }catch{} }
   if(state.profile){
-    await hydrateProfile(); await setupSignalChannel(); await checkPendingSignals();
+    await hydrateProfile(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
     const queryRoom=new URLSearchParams(location.search).get('room')?.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
     let savedRoom=null;try{savedRoom=JSON.parse(localStorage.getItem(ROOM_KEY)||'null')}catch{}
     if(queryRoom?.length===6){
@@ -167,7 +274,7 @@ async function detectDb(){
 }
 
 function defaultProfile(name){
-  return {player_key:profileKey(name),display_name:name,xp:0,english_xp:0,puzzle_xp:0,arcade_xp:0,duo_xp:0,streak:0,last_active:null}
+  return {player_key:profileKey(name),display_name:name,xp:0,english_xp:0,puzzle_xp:0,arcade_xp:0,trivia_xp:0,duo_xp:0,streak:0,last_active:null,avatar_id:'cow-classic',status_message:null,last_seen:null}
 }
 
 async function hydrateProfile(){
@@ -202,6 +309,7 @@ function touchStreak(){
 }
 
 async function persistProfile(refresh=true){
+  state.profile.last_seen=new Date().toISOString()
   localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile));localStorage.setItem(`koraverse_profile_${state.profile.player_key}`,JSON.stringify(state.profile))
   if(state.dbReady){ try{await supabase.from('koraverse_profiles').upsert({...state.profile,updated_at:new Date().toISOString()})}catch{} }
   if(refresh){ const idx=state.profiles.findIndex(p=>p.player_key===state.profile.player_key);if(idx>=0)state.profiles[idx]={...state.profile};else state.profiles.push({...state.profile}) }
@@ -211,7 +319,7 @@ async function awardXP(amount,category='general',source='activity',{duo=false,si
   if(!state.profile||amount<=0)return
   const oldLevel=levelFromXP(state.profile.xp||0)
   state.profile.xp=(state.profile.xp||0)+amount
-  const field={english:'english_xp',puzzle:'puzzle_xp',arcade:'arcade_xp',duo:'duo_xp'}[category]
+  const field={english:'english_xp',puzzle:'puzzle_xp',arcade:'arcade_xp',trivia:'trivia_xp',duo:'duo_xp'}[category]
   if(field) state.profile[field]=(state.profile[field]||0)+amount
   await persistProfile()
   if(state.dbReady){
@@ -246,7 +354,7 @@ function renderGate(){
 }
 
 async function chooseProfile(name){
-  state.profile=defaultProfile(name); localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile)); await hydrateProfile(); await setupSignalChannel(); await checkPendingSignals();
+  state.profile=defaultProfile(name); localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile)); await hydrateProfile(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
   const room=new URLSearchParams(location.search).get('room')?.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
   if(room?.length===6)return connectRoom('guest',room)
   renderHome()
@@ -255,38 +363,47 @@ async function chooseProfile(name){
 function dashboardHero(){
   const p=xpProgress(); const other=otherDefault(); const otherProfile=state.profiles.find(x=>x.player_key===other)
   const daily=englishCurriculum[(new Date().getDate()-1)%englishCurriculum.length]
-  return `<section class="command-hero">
+  const av=avatarById(state.profile.avatar_id)
+  const online=partnerIsOnline()
+  return `<section class="command-hero premium-home">
     <div class="hero-copy">
       <div class="eyebrow-v3"><i class="online-dot"></i> COMMAND CENTER · ${new Date().toLocaleDateString('es-DO',{weekday:'long',day:'numeric',month:'long'})}</div>
       <h1>Welcome back,<br><span>${esc(state.profile.display_name)}.</span></h1>
-      <p>${otherProfile?`${esc(otherProfile.display_name)} está en nivel ${levelFromXP(otherProfile.xp)}. `:''}Hoy el universo tiene algo corto para aprender, algo absurdo para destruir y algo tranquilo para cuando no quieras competir.</p>
-      <div class="hero-buttons"><button class="btn-v3 primary" data-action="quick-play">▶ Tengo 5 minutos</button><button class="btn-v3 signal" data-action="send-signal">🔔 Invitar a ${esc(other==='kora'?'Kora':'Carlos')}</button></div>
+      <p>${online?`${esc(partnerLabel())} está <b>online</b> ahora mismo. `:otherProfile?`${esc(otherProfile.display_name)} está en nivel ${levelFromXP(otherProfile.xp)}. `:''}Elige una dimensión, entra cinco minutos o simplemente quédate flotando aquí.</p>
+      <div class="hero-buttons"><button class="btn-v3 primary" data-action="quick-play">▶ Tengo 5 minutos</button><button class="btn-v3 signal" data-action="send-signal">🔔 Invitar a ${esc(partnerLabel())}</button><button class="btn-v3 soft" data-action="chat-toggle">💬 Chat</button><button class="btn-v3 soft" data-action="avatar-studio">✨ Avatar Studio</button></div>
       ${state.pendingSignal?`<div class="signal-banner"><span>✨</span><div><b>KORA SIGNAL recibido</b><small>${esc(state.pendingSignal.from_player)} quiere jugar contigo.</small></div><button data-action="duo-entry">Entrar</button></div>`:''}
     </div>
-    <div class="planet-console">
+    <div class="planet-console premium-console">
       <div class="orbit-line o1"></div><div class="orbit-line o2"></div><div class="orbit-line o3"></div>
-      <button class="planet-core" data-action="quick-play"><span class="planet-glow"></span><b>${p.level}</b><small>LEVEL</small></button>
+      <button class="planet-core morph-core" data-action="avatar-studio" aria-label="Perfil y avatar">
+        <span class="planet-glow"></span>
+        <span class="core-face level-face"><b>${p.level}</b><small>LEVEL</small></span>
+        <span class="core-face avatar-face">${avatarVisual(av.id,'xl')}<small>${esc(av.name)}</small></span>
+        <span class="core-face status-face"><i class="status-orb ${online?'on':''}"></i><b>${online?'DUO LINK':'SOLO MODE'}</b><small>${online?`${esc(partnerLabel())} ONLINE`:`${state.profile.xp} XP`}</small></span>
+      </button>
       <button class="satellite s1" data-action="world" data-world="english">🇬🇧<span>English</span></button>
       <button class="satellite s2" data-action="world" data-world="arcade">🚀<span>Arcade</span></button>
       <button class="satellite s3" data-action="world" data-world="puzzles">🧩<span>Puzzles</span></button>
       <button class="satellite s4" data-action="world" data-world="chill">🌿<span>Chill</span></button>
+      <button class="satellite s5" data-action="world" data-world="trivia">🎬<span>Trivia</span></button>
     </div>
   </section>
   <section class="dashboard-strip">
     <div class="xp-card glass"><div class="xp-ring" style="--p:${p.pct}%"><span>${p.level}</span></div><div><small>TU PROGRESO</small><b>${state.profile.xp} XP</b><p>${p.next} XP para nivel ${p.level+1}</p></div></div>
     <button class="daily-card glass" data-action="english-lesson" data-lesson="${daily.id}"><span>${daily.icon}</span><div><small>DAILY ENGLISH · ${daily.level}</small><b>${daily.title}</b><p>4 min · +XP · ${daily.subtitle}</p></div><i>→</i></button>
-    <button class="garden-card glass" data-action="garden"><span>🌷</span><div><small>THE GARDEN</small><b>Nivel ${state.duoStats.garden_level||1}</b><p>Tu zona sin prisa.</p></div><i>→</i></button>
+    <button class="garden-card glass" data-action="coffee"><span>☕</span><div><small>COFFEE SIGNAL</small><b>${online?`${esc(partnerLabel())} está online`:'Mini break?'}</b><p>Invita a café, paseo o simplemente a hablar.</p></div><i>→</i></button>
   </section>`
 }
 
 function worldPreview(){
   return `<section class="section-block"><div class="section-title"><div><small>EXPLORE THE UNIVERSE</small><h2>¿Qué te apetece?</h2></div><button class="text-btn" data-action="profile">Ver mi progreso →</button></div>
-  <div class="world-grid">
+  <div class="world-grid premium-world-grid">
     ${worldCard('🚀','ARCADE','Caso cerrado. Literalmente.','Case Invaders, Memory, Chaos y clásicos.','arcade','#ff7fb0')}
     ${worldCard('🧩','PUZZLE LAB','Para cuando el cerebro pide otra cosa.','Sudoku, lógica y memoria.','puzzles','#56c8ff')}
+    ${worldCard('🎬','TRIVIA UNIVERSE','Solo o en dúo.','Game of Thrones, Marvel, series, cine y Mix.','trivia','#ffd56a')}
     ${worldCard('🇬🇧','ENGLISH LAB','Aprende sin sentir que estás estudiando.','Ruta A1 → A2 → B1 y quest diario.','english','#7ce3a7')}
     ${worldCard('🤝','DUO REALM','Dos pantallas. Una dimensión.','Trivia, Same Brain, Sudoku Duo y boss.','duo','#8b7cff')}
-    ${worldCard('🌿','CHILL ZONE','Nada que demostrar aquí.','Garden, respiración y pequeñas pausas.','chill','#ffd56a')}
+    ${worldCard('🌿','CHILL ZONE','Nada que demostrar aquí.','Garden, café, lluvia, lectura y pausas.','chill','#9ee7c1')}
   </div></section>`
 }
 function worldCard(icon,kicker,title,desc,world,color){return `<button class="world-card" style="--accent:${color}" data-action="${world==='duo'?'duo-entry':'world'}" ${world!=='duo'?`data-world="${world}"`:''}><span class="world-icon">${icon}</span><small>${kicker}</small><h3>${title}</h3><p>${desc}</p><i>EXPLORE ↗</i></button>`}
@@ -296,7 +413,7 @@ function podiumBlock(){
   list.sort((a,b)=>(b.xp||0)-(a.xp||0)); while(list.length<2){const k=list[0]?.player_key==='carlos'?'kora':'carlos';list.push(defaultProfile(k==='kora'?'Kora':'Carlos'))}
   return `<section class="section-block podium-section"><div class="section-title"><div><small>EXPERIENCE PODIUM</small><h2>La carrera más innecesariamente seria.</h2></div><span class="duo-level">DUO XP · ${state.duoStats.xp||0}</span></div>
     <div class="podium-wrap">
-      ${list.slice(0,2).map((p,i)=>`<div class="podium-player rank-${i+1}"><div class="crown">${i===0?'👑':'✦'}</div><div class="pod-avatar">${esc(p.display_name.slice(0,1).toUpperCase())}</div><b>${esc(p.display_name)}</b><small>Lv. ${levelFromXP(p.xp||0)}</small><strong>${p.xp||0} XP</strong><div class="pod-base"><span>#${i+1}</span></div></div>`).join('')}
+      ${list.slice(0,2).map((p,i)=>`<div class="podium-player rank-${i+1}"><div class="crown">${i===0?'👑':'✦'}</div><div class="pod-avatar premium-pod">${avatarVisual(p.avatar_id,'lg')}</div><b>${esc(p.display_name)}</b><small>Lv. ${levelFromXP(p.xp||0)}</small><strong>${p.xp||0} XP</strong><div class="pod-base"><span>#${i+1}</span></div></div>`).join('')}
       <div class="podium-side glass"><small>DUO PROGRESS</small><b>Level ${levelFromXP(state.duoStats.xp||0)}</b><div class="bar"><i style="width:${xpProgress({xp:state.duoStats.xp||0}).pct}%"></i></div><p>Cuando juegan juntos, ambos ganan XP personal y el universo gana Duo XP.</p></div>
     </div>
   </section>`
@@ -308,6 +425,7 @@ function renderHome(){
 
 function renderWorld(world){
   clearTimers(); state.screen=world
+  if(world==='trivia') return renderTriviaHub()
   const map={
     arcade:{eyebrow:'ARCADE DISTRICT',title:'Destruye el backlog.',sub:'Juegos rápidos, combos y una cantidad sospechosa de expedientes.',cards:[
       ['🚀','Case Invaders','Navecita + casos + láser. Era inevitable.','case-invaders','SOLO / DUO'],
@@ -321,16 +439,52 @@ function renderWorld(world){
       ['🧠','Memory Reactor','También cuenta como ejercicio mental.','memory','SOLO'],
     ]},
     english:{eyebrow:'ENGLISH LAB',title:'Small lessons. Real progress.',sub:'Fundamentos concretos, sesiones de 3–8 minutos y práctica diaria.',cards:[]},
-    chill:{eyebrow:'CHILL ZONE',title:'Aquí no hay backlog.',sub:'Entra cuando no quieras competir con absolutamente nadie.',cards:[
+    chill:{eyebrow:'CHILL ZONE',title:'Aquí no hay backlog.',sub:'Una zona para estar, no necesariamente para ganar.',cards:[
       ['🌷','The Garden','Toca flores, lee algo tranquilo y sal cuando quieras.','garden','SOLO'],
       ['🌌','Star Drift','Una pausa visual de dos minutos.','star-drift','SOLO'],
-      ['☕','Coffee Break','Preguntas suaves para desconectarte.','coffee','SOLO'],
+      ['☕','Coffee Break','Invita a café, paseo, postre o conversación.','coffee','SOCIAL'],
+      ['🌧️','Rain Room','Lluvia digital, cero objetivos.','rain-room','RELAX'],
+      ['🪐','Mood Orbit','Elige cómo se siente el día y cambia la atmósfera.','mood-orbit','RELAX'],
+      ['📖','Quiet Library','Una frase, silencio y un rincón sin puntuación.','quiet-library','RELAX'],
     ]}
   }
   const cfg=map[world]
   if(world==='english') return renderEnglishHub()
   app.innerHTML=shell(`<section class="world-hero"><div><small>${cfg.eyebrow}</small><h1>${cfg.title}</h1><p>${cfg.sub}</p></div><div class="world-emblem">${world==='arcade'?'🚀':world==='puzzles'?'🧩':'🌿'}</div></section>
   <div class="activity-grid">${cfg.cards.map(([icon,title,desc,action,tag])=>`<button class="activity-card" data-action="${action}"><span>${icon}</span><i>${tag}</i><h3>${title}</h3><p>${desc}</p><b>OPEN →</b></button>`).join('')}</div>`,{world,back:{action:'home',label:'Command Center'}})
+}
+
+function renderTriviaHub(){
+  state.screen='trivia';clearTimers()
+  const cats=[
+    ['got','🐉','Game of Thrones','Casas, lugares, personajes y momentos memorables.'],
+    ['marvel','🦸','Marvel / Avengers','Héroes, villanos, artefactos y MCU.'],
+    ['series','📺','Series famosas','Breaking Bad, Friends, Stranger Things, The Office y más.'],
+    ['movies','🎬','Películas','Cine, clásicos, sagas y cultura pop.'],
+    ['mix','🎲','Mix Universe','Todo mezclado. El caos correcto.'],
+  ]
+  app.innerHTML=shell(`<section class="world-hero trivia-hero"><div><small>TRIVIA UNIVERSE · SOLO + DUO</small><h1>Knowledge,<br>but make it fun.</h1><p>Juega solo para ganar XP personal o entra a Duo Realm para bloquear las respuestas hasta que ambos elijan.</p></div><div class="trivia-xp-card glass"><span>🎬</span><b>${state.profile.trivia_xp||0} XP</b><small>TRIVIA XP</small><button class="btn-v3 signal" data-action="duo-entry">Duo Trivia →</button></div></section>
+  <div class="trivia-category-grid">${cats.map(([id,icon,title,desc])=>`<button class="trivia-category" data-action="solo-trivia-start" data-cat="${id}"><span>${icon}</span><small>10 QUESTIONS</small><h3>${title}</h3><p>${desc}</p><i>PLAY SOLO →</i></button>`).join('')}</div>`,{world:'trivia',back:{action:'home',label:'Command Center'}})
+}
+function startSoloTrivia(cat='mix'){
+  const all=cat==='mix'?Object.values(triviaBank).flat():triviaBank[cat]
+  const queue=[...all].sort(()=>Math.random()-.5).slice(0,Math.min(10,all.length))
+  state.soloTrivia={category:cat,queue,index:0,score:0,streak:0,answered:false,selected:null};renderSoloTrivia()
+}
+function renderSoloTrivia(){
+  const t=state.soloTrivia,q=t.queue[t.index];if(!q)return finishSoloTrivia()
+  state.screen='trivia-play';const label={got:'GAME OF THRONES',marvel:'MARVEL',series:'SERIES',movies:'CINE',mix:'MIX UNIVERSE'}[t.category]||'TRIVIA'
+  app.innerHTML=shell(`<section class="duo-game-head"><button data-action="world" data-world="trivia">← Trivia Universe</button><span>${label} · ${t.index+1}/${t.queue.length}</span><span>🔥 ${t.streak}</span></section><div class="duo-question glass-xl solo-trivia-card"><small>SOLO TRIVIA</small><h1>${esc(q.q)}</h1><div class="trivia-options">${q.a.map((a,i)=>`<button data-action="solo-trivia-answer" data-index="${i}" class="${t.answered&&q.c===i?'correct':''} ${t.answered&&t.selected===i&&i!==q.c?'wrong':''}"><span>${String.fromCharCode(65+i)}</span>${esc(a)}</button>`).join('')}</div>${t.answered?`<div class="duo-result"><b>${t.selected===q.c?'CORRECT ✨':'REVEAL'}</b><p>${t.selected===q.c?`Racha ${t.streak}. +8 XP`:`Respuesta correcta: ${esc(q.a[q.c])}`}</p><button class="btn-v3 primary" data-action="solo-trivia-next">${t.index===t.queue.length-1?'Ver resultado':'Siguiente →'}</button></div>`:''}</div>`,{world:'trivia'})
+}
+async function answerSoloTrivia(index){
+  const t=state.soloTrivia;if(t.answered)return;const q=t.queue[t.index];t.answered=true;t.selected=index
+  if(index===q.c){t.score++;t.streak++;await awardXP(8,'trivia','Trivia Solo')}else t.streak=0
+  beep(index===q.c?'good':'bad');renderSoloTrivia()
+}
+function nextSoloTrivia(){const t=state.soloTrivia;t.index++;t.answered=false;t.selected=null;if(t.index>=t.queue.length)return finishSoloTrivia();renderSoloTrivia()}
+async function finishSoloTrivia(){
+  const t=state.soloTrivia,bonus=t.score>=8?20:t.score>=5?10:5;await awardXP(bonus,'trivia','Trivia Finish',{silent:true});if(t.score>=8)confetti(55)
+  app.innerHTML=shell(`<section class="result-screen"><div class="result-orb">🎬</div><small>TRIVIA COMPLETE</small><h1>${t.score}/${t.queue.length}</h1><p>${t.score>=8?'El universo sospecha que estabas estudiando.':t.score>=5?'Bastante digno.':'Se acepta revancha inmediatamente.'} · +${bonus} bonus XP</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="solo-trivia-start" data-cat="${t.category}">Otra ronda</button><button class="btn-v3 soft" data-action="world" data-world="trivia">Trivia Universe</button></div></section>`,{world:'trivia'})
 }
 
 function renderEnglishHub(){
@@ -436,19 +590,38 @@ async function finishInvaders(){const inv=state.invaders;if(!inv?.active)return;
 // ---------- CHILL ----------
 function renderGarden(){state.screen='garden';clearTimers();const flowers=Array.from({length:34},(_,i)=>`<button class="flower-v3" style="--x:${3+Math.random()*94}%;--y:${3+Math.random()*40}%;--d:${Math.random()*2}s;--c:${random(['#ff8fb1','#ffe16f','#a886ff','#ffac78','#7fdca7','#6fc7ff'])}" data-action="garden-flower"></button>`).join('');app.innerHTML=shell(`<section class="garden-v3"><div class="garden-sky"><div class="sun-v3"></div><div class="cloud-v3 c1"></div><div class="cloud-v3 c2"></div></div><div class="garden-message glass"><small>THE GARDEN</small><h2>Por hoy, el caos puede esperar.</h2><p id="gardenQuote">${random(gardenQuotes)}</p></div>${flowers}<div class="garden-ground"></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function starDrift(){state.screen='star-drift';app.innerHTML=shell(`<section class="drift"><div class="drift-copy"><small>STAR DRIFT · 2 MIN PAUSE</small><h1>No tienes que ganar esto.</h1><p>Mueve el cursor. Respira. Recoge luz si quieres.</p></div><div class="drift-field" id="driftField"><div class="drift-star" id="driftStar">✦</div>${Array.from({length:24},()=>`<i style="left:${Math.random()*96}%;top:${Math.random()*94}%;animation-delay:${Math.random()*3}s"></i>`).join('')}</div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}});const f=document.querySelector('#driftField'),s=document.querySelector('#driftStar');f.onpointermove=e=>{const r=f.getBoundingClientRect();s.style.transform=`translate(${e.clientX-r.left-18}px,${e.clientY-r.top-18}px)`}}
-function coffeeBreak(){const qs=['¿Qué fue lo menos terrible de hoy?','Si pudieras salir ahora mismo, ¿a dónde irías?','¿Qué canción describiría tu energía de este momento?','¿Qué pequeña cosa te gustaría que pasara antes de terminar el día?','¿Café, postre, libro o paseo?'];app.innerHTML=shell(`<section class="coffee-screen"><div class="coffee-cup">☕</div><small>COFFEE BREAK</small><h1>${random(qs)}</h1><p>No hay respuesta correcta. Ni siquiera tienes que responder.</p><button class="btn-v3 soft" data-action="coffee">Otra pregunta</button></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
+function coffeeBreak(){
+  state.screen='coffee'
+  const qs=['¿Qué fue lo menos terrible de hoy?','Si pudieras salir ahora mismo, ¿a dónde irías?','¿Qué canción describiría tu energía de este momento?','¿Qué pequeña cosa te gustaría que pasara antes de terminar el día?','¿Café, postre, libro o paseo?']
+  app.innerHTML=shell(`<section class="coffee-premium"><div class="coffee-main"><div class="coffee-cup">☕</div><small>COFFEE BREAK · SOCIAL CHILL</small><h1>${random(qs)}</h1><p>No hay respuesta correcta. Pero sí puedes convertir la pausa digital en una invitación real.</p><div class="coffee-actions">${coffeeActions.map(a=>`<button data-action="coffee-invite" data-coffee="${a.id}"><span>${a.icon}</span><b>${a.label}</b><small>${partnerIsOnline()?'Enviar ahora':'Quedará en el chat'}</small></button>`).join('')}</div><button class="btn-v3 soft" data-action="coffee">Otra pregunta</button></div><aside class="coffee-status glass"><small>DUO STATUS</small>${avatarVisual(state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||'cow-classic','lg')}<b>${esc(partnerLabel())}</b><p><i class="presence-dot ${partnerIsOnline()?'on':''}"></i>${partnerIsOnline()?'Online en KORAVERSE':'Offline · verá tu invitación al entrar'}</p><button class="btn-v3 soft" data-action="chat-toggle">Abrir chat</button></aside></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})
+}
+async function sendCoffeeInvite(id){const item=coffeeActions.find(x=>x.id===id)||coffeeActions[0];await sendChatMessage(item.message,'coffee_invite',{action:id});toast(`${item.icon} Invitación enviada`,'signal');beep('signal');fetch('/api/kora-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_player:state.profile.player_key,to_player:otherDefault(),from_name:state.profile.display_name,message:item.message,kind:'coffee'})}).catch(()=>{})}
+function rainRoom(){state.screen='rain-room';app.innerHTML=shell(`<section class="rain-room"><div class="rain-window">${Array.from({length:70},(_,i)=>`<i style="--x:${Math.random()*100}%;--d:${Math.random()*2.4}s;--s:${.7+Math.random()*1.4}"></i>`).join('')}<div class="rain-copy glass"><small>RAIN ROOM</small><h1>Nothing to solve.</h1><p>Quédate aquí un minuto. La lluvia no necesita seguimiento.</p><button class="btn-v3 soft" data-action="coffee-invite" data-coffee="five">Invitar a mini break</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
+function moodOrbit(){state.screen='mood';const moods=[['calm','🌿','Calm'],['tired','🌙','Tired'],['chaos','⚡','Chaos'],['happy','✨','Good'],['quiet','☁️','Quiet']];app.innerHTML=shell(`<section class="mood-room"><small>MOOD ORBIT</small><h1>¿Qué energía tiene el día?</h1><p>Esto no puntúa. Solo cambia un poco el universo.</p><div class="mood-grid">${moods.map(([id,ic,label])=>`<button class="${state.mood===id?'active':''}" data-action="mood-select" data-mood="${id}"><span>${ic}</span><b>${label}</b></button>`).join('')}</div><div class="mood-planet mood-${state.mood||'calm'}"></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
+function selectMood(m){state.mood=m;beep('soft');moodOrbit()}
+function quietLibraryRoom(){state.screen='library';app.innerHTML=shell(`<section class="quiet-library"><div class="library-card glass-xl"><span>📖</span><small>QUIET LIBRARY</small><h1>${esc(random(quietLibrary))}</h1><p>Una página imaginaria. Cero notificaciones durante exactamente el tiempo que tú decidas.</p><div class="hero-buttons"><button class="btn-v3 soft" data-action="quiet-library">Otra página</button><button class="btn-v3 signal" data-action="quick-chat" data-message="Te encontré una frase bonita en Quiet Library 📖">Compartir en chat</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 
-// ---------- PROFILE / PODIUM ----------
-function renderProfile(){state.screen='profile';const p=xpProgress(),earned=achievements.filter(a=>a.level?p.level>=a.level:(state.profile[a.category||'xp']||0)>=a.threshold);app.innerHTML=shell(`<section class="profile-hero"><div class="big-avatar">${esc(state.profile.display_name[0].toUpperCase())}</div><div><small>PLAYER PROFILE</small><h1>${esc(state.profile.display_name)}</h1><p>Level ${p.level} · ${state.profile.xp} XP · 🔥 ${state.profile.streak||1} day streak</p></div><div class="hero-buttons profile-actions"><button class="btn-v3 soft" data-action="notify-enable">🔔 Activar alertas</button><button class="btn-v3 soft" data-action="switch-profile">Cambiar jugador</button></div></section><section class="profile-grid"><div class="profile-panel glass"><small>PROGRESS TO LEVEL ${p.level+1}</small><div class="big-progress"><i style="width:${p.pct}%"></i></div><b>${state.profile.xp} XP</b><p>${p.next} XP restantes.</p></div><div class="profile-panel glass stats-list"><div><span>🇬🇧 English</span><b>${state.profile.english_xp||0}</b></div><div><span>🧩 Puzzles</span><b>${state.profile.puzzle_xp||0}</b></div><div><span>🚀 Arcade</span><b>${state.profile.arcade_xp||0}</b></div><div><span>🤝 Duo</span><b>${state.profile.duo_xp||0}</b></div></div></section><section class="section-block"><div class="section-title"><div><small>ACHIEVEMENTS</small><h2>${earned.length}/${achievements.length} unlocked</h2></div></div><div class="achievement-grid">${achievements.map(a=>{const ok=earned.some(e=>e.id===a.id);return `<div class="achievement ${ok?'unlocked':''}"><span>${a.icon}</span><div><b>${a.title}</b><p>${a.desc}</p></div><i>${ok?'✓':'🔒'}</i></div>`}).join('')}</div></section>${podiumBlock()}`,{world:'home',back:{action:'home',label:'Command Center'}})}
+
+// ---------- PROFILE / AVATARS / PODIUM ----------
+function renderProfile(){
+  state.screen='profile';const p=xpProgress(),earned=achievements.filter(a=>a.level?p.level>=a.level:(state.profile[a.category||'xp']||0)>=a.threshold),av=avatarById(state.profile.avatar_id)
+  app.innerHTML=shell(`<section class="profile-hero"><div class="big-avatar premium-big-avatar">${avatarVisual(av.id,'xl')}</div><div><small>PLAYER PROFILE</small><h1>${esc(state.profile.display_name)}</h1><p>Level ${p.level} · ${state.profile.xp} XP · 🔥 ${state.profile.streak||1} day streak · ${esc(av.name)}</p></div><div class="hero-buttons profile-actions"><button class="btn-v3 primary" data-action="avatar-studio">✨ Avatar Studio</button><button class="btn-v3 soft" data-action="notify-enable">🔔 Alertas</button><button class="btn-v3 soft" data-action="switch-profile">Cambiar jugador</button></div></section><section class="profile-grid"><div class="profile-panel glass"><small>PROGRESS TO LEVEL ${p.level+1}</small><div class="big-progress"><i style="width:${p.pct}%"></i></div><b>${state.profile.xp} XP</b><p>${p.next} XP restantes.</p></div><div class="profile-panel glass stats-list"><div><span>🇬🇧 English</span><b>${state.profile.english_xp||0}</b></div><div><span>🎬 Trivia</span><b>${state.profile.trivia_xp||0}</b></div><div><span>🧩 Puzzles</span><b>${state.profile.puzzle_xp||0}</b></div><div><span>🚀 Arcade</span><b>${state.profile.arcade_xp||0}</b></div><div><span>🤝 Duo</span><b>${state.profile.duo_xp||0}</b></div></div></section><section class="section-block"><div class="section-title"><div><small>ACHIEVEMENTS</small><h2>${earned.length}/${achievements.length} unlocked</h2></div></div><div class="achievement-grid">${achievements.map(a=>{const ok=earned.some(e=>e.id===a.id);return `<div class="achievement ${ok?'unlocked':''}"><span>${a.icon}</span><div><b>${a.title}</b><p>${a.desc}</p></div><i>${ok?'✓':'🔒'}</i></div>`}).join('')}</div></section>${podiumBlock()}`,{world:'home',back:{action:'home',label:'Command Center'}})
+}
+function renderAvatarStudio(){
+  state.screen='avatars';const xp=state.profile.xp||0;const groups=[...new Set(avatarCatalog.map(a=>a.collection))]
+  app.innerHTML=shell(`<section class="avatar-hero"><div><small>AVATAR STUDIO · COLLECT & EXPRESS</small><h1>Choose your<br><span>dimension.</span></h1><p>Vaquitas, animales, escritores y arquetipos originales de pantalla. Algunos se desbloquean simplemente jugando.</p></div><div class="avatar-stage glass-xl">${avatarVisual(state.profile.avatar_id,'xxl')}<b>${esc(avatarById(state.profile.avatar_id).name)}</b><small>${xp} XP · current avatar</small></div></section>${groups.map(g=>`<section class="avatar-collection"><div class="section-title"><div><small>COLLECTION</small><h2>${esc(g)}</h2></div></div><div class="avatar-grid">${avatarCatalog.filter(a=>a.collection===g).map(a=>{const unlocked=xp>=a.unlock,selected=a.id===state.profile.avatar_id;return `<button class="avatar-card ${selected?'selected':''} ${unlocked?'':'locked'}" data-action="select-avatar" data-avatar="${a.id}">${avatarVisual(a.id,'lg')}<small>${a.unlock?`${a.unlock} XP`:'STARTER'}</small><h3>${esc(a.name)}</h3><p>${esc(a.blurb)}</p><i>${selected?'SELECTED':unlocked?'SELECT →':'🔒 LOCKED'}</i></button>`}).join('')}</div></section>`).join('')}`,{world:'home',back:{action:'profile',label:'Profile'}})
+}
+async function selectAvatar(id){const a=avatarById(id);if((state.profile.xp||0)<a.unlock)return toast(`Se desbloquea con ${a.unlock} XP`);state.profile.avatar_id=id;await persistProfile();updatePresence(state.screen);beep('good');toast(`${a.name} seleccionado ✨`,'xp');renderAvatarStudio()}
 
 // ---------- KORA SIGNAL ----------
 async function setupSignalChannel(){
   if(!supabase||!state.profile)return
   if(state.signalChannel) await supabase.removeChannel(state.signalChannel)
-  state.signalChannel=supabase.channel('koraverse-signals-v3',{config:{broadcast:{self:false}}})
+  state.signalChannel=supabase.channel('koraverse-signals-v4',{config:{broadcast:{self:false}}})
     .on('broadcast',{event:'signal'},({payload})=>{if(payload?.to===state.profile.player_key)receiveSignal(payload)})
     .subscribe()
 }
+
 async function sendSignal(){
   const to=otherDefault(),from=state.profile.player_key,msg=`${state.profile.display_name} quiere jugar contigo.`
   if(state.signalChannel) await state.signalChannel.send({type:'broadcast',event:'signal',payload:{from,to,message:msg,ts:Date.now()}})
@@ -477,7 +650,7 @@ function urlBase64ToUint8Array(base64String){const padding='='.repeat((4-base64S
 async function showBrowserNotification(title,body){if(Notification.permission!=='granted')return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'KORA_SIGNAL',title,body})}catch{try{new Notification(title,{body})}catch{}}}
 
 // ---------- DUO REALTIME ----------
-function roomPlayer(){return {player_key:state.profile.player_key,name:state.profile.display_name,device:deviceId,role:state.room.role}}
+function roomPlayer(){return {player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',device:deviceId,role:state.room.role}}
 function roomPlayers(){const m=state.room.channel?.presenceState?.()||{};return Object.values(m).flat().map(x=>x)}
 async function connectRoom(role,code){
   if(!supabase)return toast('Supabase no está configurado.')
@@ -517,7 +690,7 @@ function renderDuoScreen(){
   const g=state.room.game;state.screen=`duo-${g.screen}`
   if(g.screen==='lobby')return renderDuoLobby();if(g.screen==='hub')return renderDuoHub();if(g.mode==='trivia')return renderDuoTrivia();if(g.mode==='brain')return renderDuoBrain();if(g.mode==='mission')return renderDuoMission();if(g.mode==='sudoku')return renderDuoSudoku();if(g.mode==='cases')return renderDuoCases();if(g.mode==='garden')return renderDuoGarden();renderDuoHub()
 }
-function renderDuoLobby(){const players=state.room.players;const unique=[];players.forEach(p=>{if(!unique.find(x=>x.player_key===p.player_key))unique.push(p)});const ready=unique.length>=2;const invite=`${location.origin}${location.pathname}?room=${state.room.code}`;app.innerHTML=shell(`<section class="duo-lobby"><div class="lobby-code"><small>PRIVATE ROOM</small><h1>${state.room.code}</h1><p>Comparte el enlace. No hace falta estar en la misma red.</p><div class="copy-link"><code>${esc(invite)}</code><button data-action="copy-room">Copy</button></div></div><div class="player-dock">${unique.map((p,i)=>`<div class="duo-player ${i===0?'p1':'p2'}"><span>${esc(p.name[0].toUpperCase())}</span><b>${esc(p.name)}</b><small>${p.role==='host'?'HOST':'PLAYER 2'}</small><i></i></div>`).join('')}${!ready?`<div class="duo-player empty"><span>?</span><b>Waiting...</b><small>PLAYER 2</small></div>`:''}</div><div class="lobby-status ${ready?'ready':''}"><i></i>${ready?'KORAVERSE LINK ESTABLISHED':'Waiting for accomplice...'}</div>${state.room.role==='host'?`<button class="btn-v3 primary big-btn ${ready?'':'disabled'}" data-action="duo-start">${ready?'ENTER DUO UNIVERSE':'WAITING...'}</button>`:`<div class="wait-copy">El anfitrión abrirá el universo cuando ambos estén conectados.</div>`}</section>`,{world:'duo',back:{action:'leave-room',label:'Salir'}})}
+function renderDuoLobby(){const players=state.room.players;const unique=[];players.forEach(p=>{if(!unique.find(x=>x.player_key===p.player_key))unique.push(p)});const ready=unique.length>=2;const invite=`${location.origin}${location.pathname}?room=${state.room.code}`;app.innerHTML=shell(`<section class="duo-lobby"><div class="lobby-code"><small>PRIVATE ROOM</small><h1>${state.room.code}</h1><p>Comparte el enlace. No hace falta estar en la misma red.</p><div class="copy-link"><code>${esc(invite)}</code><button data-action="copy-room">Copy</button></div></div><div class="player-dock">${unique.map((p,i)=>`<div class="duo-player ${i===0?'p1':'p2'}"><span class="duo-avatar-wrap">${avatarVisual(p.avatar_id||'cow-classic','md')}</span><b>${esc(p.name)}</b><small>${p.role==='host'?'HOST':'PLAYER 2'}</small><i></i></div>`).join('')}${!ready?`<div class="duo-player empty"><span>?</span><b>Waiting...</b><small>PLAYER 2</small></div>`:''}</div><div class="lobby-status ${ready?'ready':''}"><i></i>${ready?'KORAVERSE LINK ESTABLISHED':'Waiting for accomplice...'}</div>${state.room.role==='host'?`<button class="btn-v3 primary big-btn ${ready?'':'disabled'}" data-action="duo-start">${ready?'ENTER DUO UNIVERSE':'WAITING...'}</button>`:`<div class="wait-copy">El anfitrión abrirá el universo cuando ambos estén conectados.</div>`}</section>`,{world:'duo',back:{action:'leave-room',label:'Salir'}})}
 function renderDuoHub(){app.innerHTML=shell(`<section class="duo-hub-hero"><div><small>DUO REALM · ${state.room.code}</small><h1>Connected.</h1><p>Elijan algo. Cualquiera puede tocar una actividad; el host mantiene el estado sincronizado.</p></div><button class="btn-v3 signal" data-action="new-duo-room">↻ Nueva partida</button></section><div class="activity-grid duo-grid"><button class="activity-card" data-action="duo-game" data-game="trivia"><span>🎬</span><i>DUO</i><h3>Trivia Realm</h3><p>Respuestas ocultas hasta que ambos eligen.</p><b>PLAY →</b></button><button class="activity-card" data-action="duo-game" data-game="brain"><span>🧠</span><i>DUO</i><h3>Same Brain</h3><p>¿Piensan igual o fue pura propaganda?</p><b>PLAY →</b></button><button class="activity-card" data-action="duo-game" data-game="mission"><span>🕵️</span><i>OFFICE</i><h3>Mission Control</h3><p>Uno hace el reto; el otro valida.</p><b>PLAY →</b></button><button class="activity-card" data-action="duo-game" data-game="sudoku"><span>🔢</span><i>CO-OP</i><h3>Sudoku Duo</h3><p>Un tablero compartido. Dos cerebros.</p><b>PLAY →</b></button><button class="activity-card" data-action="duo-game" data-game="cases"><span>📁</span><i>CLASSIC+</i><h3>Case Arena</h3><p>20 casos y luego llega el Lic. Urgentísimo.</p><b>PLAY →</b></button><button class="activity-card" data-action="duo-invaders"><span>🚀</span><i>DUO RAID</i><h3>Case Invaders</h3><p>Cada uno pilota su nave. Los impactos se suman.</p><b>PLAY →</b></button><button class="activity-card" data-action="duo-game" data-game="garden"><span>🌷</span><i>REWARD</i><h3>The Garden</h3><p>${state.room.game.gardenUnlocked?'Desbloqueado.':'Derroten al boss para desbloquearlo.'}</p><b>OPEN →</b></button></div>`,{world:'duo',back:{action:'leave-room',label:'Salir de sala'}})}
 
 function applyDuoAction(action,data){const g=state.room.game;const players=activeDuoPlayers();if(action==='start'){g.screen='hub';g.mode=null}else if(action==='hub'){g.screen='hub';g.mode=null}else if(action==='trivia'){const cat=data.cat||random(Object.keys(triviaBank)),q=random(triviaBank[cat]);g.screen='game';g.mode='trivia';g.round++;g.trivia={cat,q};g.answers={};g.result=null}else if(action==='brain'){g.screen='game';g.mode='brain';g.round++;g.brain=random(sameBrain);g.brainAnswers={};g.brainResult=null}else if(action==='mission'){g.screen='game';g.mode='mission';g.round++;const assignee=random(players),validator=players.find(x=>x!==assignee)||assignee;g.mission={text:random(missions),assignee,validator,status:'pending'}}else if(action==='sudoku'){const p=sudokuPuzzles[0];g.screen='game';g.mode='sudoku';g.round++;g.sudokuId=p.id;g.sudokuBoard=p.puzzle.split('').map(Number);g.sudokuFixed=p.puzzle.split('').map(x=>x!=='0');g.sudokuStatus=null}else if(action==='cases'){g.screen='game';g.mode='cases';g.round++;g.casePhase='cases';g.caseCount=0;g.bossHP=100}else if(action==='garden'){if(!g.gardenUnlocked)return toast('The Garden sigue dormido.');g.screen='game';g.mode='garden'}broadcastGame()}
@@ -552,11 +725,24 @@ app.addEventListener('click',async e=>{
   if(a==='home')return renderHome()
   if(a==='world')return renderWorld(el.dataset.world)
   if(a==='profile')return renderProfile()
-  if(a==='switch-profile'){localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
+  if(a==='switch-profile'){if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
   if(a==='sound'){state.sound=!state.sound;localStorage.setItem(SOUND_KEY,state.sound?'on':'off');toast(state.sound?'Sonido activado':'Sonido desactivado');return state.screen==='home'?renderHome():null}
   if(a==='kora-tip')return toast(random(['Moo. El backlog no se destruye solo.','English Quest disponible. No te hagas.','Si no quieres competir, The Garden no hace preguntas.','KORAVERSE recomienda una pausa de 5 minutos.']))
-  if(a==='quick-play'){const actions=['case-invaders','memory','chaos','sudoku'];return app.querySelector(`[data-action="${random(actions)}"]`)?.click()||startInvaders()}
+  if(a==='quick-play'){const pick=random(['invaders','memory','chaos','sudoku','trivia']);if(pick==='memory')return startMemory();if(pick==='chaos')return startChaos();if(pick==='sudoku')return startSudoku();if(pick==='trivia')return startSoloTrivia('mix');return startInvaders()}
   if(a==='send-signal')return sendSignal()
+  if(a==='chat-toggle')return toggleChat()
+  if(a==='chat-send'){const input=document.querySelector('#chatInput');const v=input?.value||'';if(input)input.value='';return sendChatMessage(v)}
+  if(a==='quick-chat')return sendChatMessage(el.dataset.message||'Hola ✨')
+  if(a==='coffee-invite')return sendCoffeeInvite(el.dataset.coffee)
+  if(a==='avatar-studio')return renderAvatarStudio()
+  if(a==='select-avatar')return selectAvatar(el.dataset.avatar)
+  if(a==='solo-trivia-start')return startSoloTrivia(el.dataset.cat||'mix')
+  if(a==='solo-trivia-answer')return answerSoloTrivia(Number(el.dataset.index))
+  if(a==='solo-trivia-next')return nextSoloTrivia()
+  if(a==='rain-room')return rainRoom()
+  if(a==='mood-orbit')return moodOrbit()
+  if(a==='mood-select')return selectMood(el.dataset.mood)
+  if(a==='quiet-library')return quietLibraryRoom()
   if(a==='notify-enable')return enableNotifications()
   if(a==='english-lesson')return startEnglishLesson(el.dataset.lesson)
   if(a==='english-answer')return answerEnglish(Number(el.dataset.index))
@@ -604,5 +790,7 @@ onRoomAction=function(p){
   if(p?.action==='sudoku-check'&&state.room.role==='host'){return checkDuoSudoku()}
   return _onRoomAction(p)
 }
+
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target?.id==='chatInput'){e.preventDefault();const v=e.target.value;e.target.value='';sendChatMessage(v)}})
 
 init()

@@ -1,31 +1,33 @@
-# KORAVERSE 3.0 — What's new
+# KORAVERSE Changelog
 
-- Nuevo Command Center animado.
-- Perfiles persistentes con XP, niveles y racha.
-- Podio Carlos/Kora + Duo XP.
-- Solo Mode real.
-- English Lab A1 → A2 → B1.
-- Daily English Quest.
-- Contenido English extensible desde Supabase.
-- Sudoku Solo.
-- Sudoku Duo sincronizado.
-- Case Invaders Canvas (navecita destruyendo casos).
-- Case Invaders Duo Raid.
+## 4.0.0 — Premium Social Core
+
+### Nuevo
+- Avatar Studio con colecciones Cows, Animals, Writers y Screen Archetypes originales.
+- Vaquitas seleccionables y desbloqueables por XP.
+- Esfera central viva que alterna automáticamente Level / Avatar / Online Status.
+- Presencia global online/offline con Supabase Realtime Presence.
+- KORAVERSE Chat en tiempo real con historial persistente en Supabase.
+- Quick messages y accesos rápidos desde el chat.
+- Coffee Signal: “Vamos por un café”, postre, paseo, conversación, canción o mini break.
+- Trivia Universe visible en Solo Mode y conservada en Duo Mode.
+- Trivia XP individual y rondas Solo de 10 preguntas.
+- Chill Zone expandida con Rain Room, Mood Orbit y Quiet Library.
+- Avatares visibles en perfil, podio y lobby Duo.
+
+### Conservado
+- English Lab.
+- Sudoku Solo y Duo.
 - Memory Reactor.
 - 30 Second Chaos.
-- Trivia Realm sincronizado.
+- Case Invaders Solo y Duo.
 - Same Brain.
 - Mission Control.
-- Classic Case Arena + Lic. Urgentísimo.
-- The Garden renovado.
+- Case Arena / Lic. Urgentísimo.
+- The Garden.
 - Star Drift.
-- Coffee Break.
-- KORA SIGNAL en Realtime.
-- Señales pendientes guardadas en Supabase.
-- Notificaciones del navegador.
-- Backend opcional para Web Push real con la app cerrada.
-- PWA instalable.
-- Reconexión de sala y estado de host guardado localmente.
-- Nueva partida / nuevo código.
-- Sonido generado con Web Audio y control ON/OFF.
-- UI responsive móvil/escritorio.
+- KORA SIGNAL y soporte opcional de Push Notifications.
+- Nueva partida / nuevo código de sala.
+
+### Base de datos
+Ejecutar `supabase/migration_v4.sql` sobre una instalación 3.0 existente.

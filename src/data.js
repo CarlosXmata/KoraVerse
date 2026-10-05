@@ -133,3 +133,42 @@ export const achievements = [
   { id:'puzzle-100', icon:'🧠', title:'Big Brain', desc:'Consigue 100 XP en Puzzle Lab.', category:'puzzle_xp', threshold:100 },
   { id:'level-5', icon:'🏆', title:'Nivel 5', desc:'Llega al nivel 5.', level:5 },
 ]
+
+export const avatarCatalog = [
+  {id:'cow-classic',collection:'COWS',name:'Classic Cow',icon:'🐮',badge:'✦',accent:'#8b7cff',unlock:0,blurb:'La vaca fundadora del KORAVERSE.'},
+  {id:'cow-coffee',collection:'COWS',name:'Coffee Cow',icon:'🐮',badge:'☕',accent:'#ffd56a',unlock:0,blurb:'Funciona mejor después del primer café.'},
+  {id:'cow-reader',collection:'COWS',name:'Reading Cow',icon:'🐮',badge:'📚',accent:'#56c8ff',unlock:80,blurb:'Lee incluso durante el caos.'},
+  {id:'cow-galaxy',collection:'COWS',name:'Galaxy Cow',icon:'🐮',badge:'🌌',accent:'#a886ff',unlock:180,blurb:'Probablemente vino de otra dimensión.'},
+  {id:'cow-garden',collection:'COWS',name:'Garden Cow',icon:'🐮',badge:'🌷',accent:'#7ce3a7',unlock:260,blurb:'No discute con el backlog. Planta flores.'},
+  {id:'cow-night',collection:'COWS',name:'Night Cow',icon:'🐮',badge:'🌙',accent:'#6574ff',unlock:420,blurb:'Especialista en aparecer después de las 6.'},
+  {id:'fox-soft',collection:'ANIMALS',name:'Soft Fox',icon:'🦊',badge:'✨',accent:'#ff9c6b',unlock:0,blurb:'Demasiado elegante para correr.'},
+  {id:'panda-focus',collection:'ANIMALS',name:'Focus Panda',icon:'🐼',badge:'🧠',accent:'#d8deef',unlock:100,blurb:'Sudoku primero. Drama después.'},
+  {id:'capy-chill',collection:'ANIMALS',name:'Chill Capy',icon:'🦫',badge:'🌿',accent:'#7ce3a7',unlock:160,blurb:'No conoce la palabra urgente.'},
+  {id:'cat-midnight',collection:'ANIMALS',name:'Midnight Cat',icon:'🐈',badge:'🌙',accent:'#8b7cff',unlock:230,blurb:'Online. Probablemente juzgándote.'},
+  {id:'writer-poet',collection:'WRITERS',name:'The Poet',icon:'✍️',badge:'☾',accent:'#ff7fb0',unlock:120,blurb:'Convierte todo en una línea innecesariamente bonita.'},
+  {id:'writer-novelist',collection:'WRITERS',name:'The Novelist',icon:'📖',badge:'✦',accent:'#56c8ff',unlock:220,blurb:'Siempre está a una página de desaparecer.'},
+  {id:'writer-philosopher',collection:'WRITERS',name:'The Philosopher',icon:'🪶',badge:'?',accent:'#ffd56a',unlock:320,blurb:'Responde una pregunta con tres preguntas nuevas.'},
+  {id:'writer-midnight',collection:'WRITERS',name:'Midnight Writer',icon:'🖋️',badge:'🌙',accent:'#8b7cff',unlock:500,blurb:'Escribe mejor cuando debería estar durmiendo.'},
+  {id:'screen-dragon',collection:'SCREEN ARCHETYPES',name:'The Dragon Heir',icon:'🐉',badge:'♛',accent:'#ff7d7d',unlock:180,blurb:'No reclama el trono. Reclama XP.'},
+  {id:'screen-detective',collection:'SCREEN ARCHETYPES',name:'Night Detective',icon:'🕵️',badge:'🔎',accent:'#56c8ff',unlock:260,blurb:'Ya sabe quién movió la última pieza.'},
+  {id:'screen-queen',collection:'SCREEN ARCHETYPES',name:'The Crowned Queen',icon:'👑',badge:'✦',accent:'#ff7fb0',unlock:360,blurb:'No necesita presentación.'},
+  {id:'screen-traveler',collection:'SCREEN ARCHETYPES',name:'Time Traveler',icon:'⌛',badge:'⚡',accent:'#7ce3a7',unlock:460,blurb:'Llegó antes de que mandaras la invitación.'},
+  {id:'screen-office',collection:'SCREEN ARCHETYPES',name:'Office Survivor',icon:'💼',badge:'☕',accent:'#ffd56a',unlock:600,blurb:'Sobrevivió otra reunión que pudo ser un correo.'},
+]
+
+export const coffeeActions = [
+  {id:'coffee',icon:'☕',label:'Vamos por un café',message:'Vamos por un café ☕'},
+  {id:'dessert',icon:'🍰',label:'Vamos por algo dulce',message:'Vamos por algo dulce 🍰'},
+  {id:'walk',icon:'🌿',label:'Damos una vuelta',message:'¿Damos una vuelta un rato? 🌿'},
+  {id:'talk',icon:'💬',label:'Quiero hablar contigo',message:'Quiero hablar contigo un rato 💬'},
+  {id:'song',icon:'🎧',label:'Recomiéndame una canción',message:'Recomiéndame una canción 🎧'},
+  {id:'five',icon:'✨',label:'Mini break',message:'¿Mini break de 5 minutos? ✨'},
+]
+
+export const quietLibrary = [
+  'No todo minuto libre tiene que convertirse en productividad.',
+  'A veces una pausa breve arregla más que otro café.',
+  'Leer una página también cuenta como salir un momento del ruido.',
+  'No todo lo urgente merece convertirse en importante.',
+  'Un día pesado sigue teniendo espacios pequeños donde respirar.',
+]

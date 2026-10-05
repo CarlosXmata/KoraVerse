@@ -1,45 +1,53 @@
-# KORAVERSE 3.0 — QUÉ HACER PRIMERO
+# KORAVERSE 4.0 — Antes de subir a GitHub
 
-Esta versión reemplaza el front-end anterior, pero reutiliza el mismo proyecto de Supabase y el mismo proyecto de Vercel.
+Esta versión es una actualización directa de KORAVERSE 3.0. Conserva los juegos existentes y añade el **Premium Social Core**.
 
-## 1) Ejecuta el SQL
+## 1. Ejecuta primero la migración de Supabase
 
-1. Abre tu proyecto **KORAVERSE** en Supabase.
-2. Ve a **SQL Editor**.
-3. Crea una consulta nueva.
-4. Copia TODO el archivo `supabase/schema.sql`.
-5. Ejecuta **Run**.
+En Supabase abre **SQL Editor → New Query** y ejecuta completo:
 
-Esto crea perfiles, XP, podio, rachas, progreso de inglés, KORA SIGNAL y almacenamiento de contenido.
+`supabase/migration_v4.sql`
 
-## 2) Sube KORAVERSE 3.0 a GitHub
+Esta migración:
+- agrega `trivia_xp`, `avatar_id`, `status_message` y `last_seen` a los perfiles;
+- crea `koraverse_messages` para chat e invitaciones persistentes.
 
-Reemplaza el contenido de tu repositorio actual con el contenido de esta carpeta.
+Debe terminar con `Success. No rows returned`.
 
-Tus variables actuales siguen funcionando:
+## 2. Sube el contenido del ZIP a la raíz del repo KoraVerse
+
+Reemplaza los archivos existentes manteniendo esta estructura:
+
+- `index.html`
+- `package.json`
+- `vercel.json`
+- `src/`
+- `public/`
+- `api/`
+- `supabase/`
+
+No subas la carpeta contenedora ni el ZIP como un archivo único.
+
+## 3. Vercel
+
+Las variables existentes siguen siendo válidas:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_KEY`
 
-Vercel volverá a desplegar automáticamente cuando hagas commit en `main`.
+No necesitas crear otro proyecto Vercel. El commit a `main` debe generar el deployment automáticamente.
 
-## 3) Prueba en este orden
+## 4. Qué probar después del deployment
 
-1. Abre la web y entra como Carlos.
-2. Juega un English Quest y confirma que sube XP.
-3. Abre la web en incógnito/móvil y entra como Kora.
-4. Confirma que el podio tiene XP separado.
-5. Prueba Sudoku Solo y Case Invaders.
-6. Crea una sala Duo y entra con ambos dispositivos.
-7. Prueba Trivia, Same Brain, Sudoku Duo y Case Arena.
-8. Pulsa `Invitar a Kora/Carlos` con la otra web abierta.
+1. Entra como Carlos y desde otro navegador/móvil como Kora.
+2. Confirma que el indicador junto al nombre del otro pase a **online**.
+3. Abre el botón de chat 💬 en ambos equipos y envía mensajes.
+4. Entra a **Avatar Studio** y selecciona una vaquita/animal.
+5. Vuelve al Command Center y observa cómo la esfera central alterna entre **nivel → avatar → estado**.
+6. Abre **Trivia Universe** y juega una ronda Solo.
+7. En Chill → Coffee Break pulsa **Vamos por un café** y confirma que la invitación aparece en el chat de la otra persona.
+8. Prueba Duo Realm para verificar que los modos previos continúan funcionando.
 
-## 4) KORA SIGNAL
+## Nota de privacidad
 
-Sin configuración adicional funciona así:
-
-- notificación instantánea si KORAVERSE está abierto en el otro dispositivo;
-- notificación del navegador si el permiso está concedido y la web está abierta/en segundo plano;
-- señal pendiente guardada en Supabase para verla en el próximo ingreso.
-
-Para **Push real incluso con la web cerrada**, revisa `README.md > Push notifications avanzadas`.
+KORAVERSE sigue usando perfiles por enlace y no Supabase Auth. El chat es adecuado para este proyecto privado/experimental, pero no debe tratarse como mensajería cifrada o de alta privacidad. Para privacidad fuerte, una fase futura debe añadir autenticación real y políticas RLS por usuario.

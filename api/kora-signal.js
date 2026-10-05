@@ -8,13 +8,18 @@ export default async function handler(req,res){
   const pub=process.env.VAPID_PUBLIC_KEY
   const priv=process.env.VAPID_PRIVATE_KEY
   if(!url||!service||!pub||!priv) return res.status(503).json({error:'Push backend not configured'})
-  const {from_player,to_player,from_name}=req.body||{}
+  const {from_player,to_player,from_name,message,kind}=req.body||{}
   if(!from_player||!to_player) return res.status(400).json({error:'Missing players'})
   webpush.setVapidDetails('mailto:koraverse@example.com',pub,priv)
   const db=createClient(url,service,{auth:{persistSession:false}})
   const {data,error}=await db.from('koraverse_push_subscriptions').select('*').eq('player_key',to_player)
   if(error) return res.status(500).json({error:error.message})
-  const payload=JSON.stringify({title:'KORA SIGNAL ✨',body:`${from_name||from_player} quiere jugar contigo.`,url:'/'})
+  const isCoffee=kind==='coffee'
+  const payload=JSON.stringify({
+    title:isCoffee?'COFFEE SIGNAL ☕':'KORA SIGNAL ✨',
+    body:message||`${from_name||from_player} quiere jugar contigo.`,
+    url:'/'
+  })
   let sent=0
   for(const row of data||[]){
     try{await webpush.sendNotification(row.subscription,payload);sent++}
