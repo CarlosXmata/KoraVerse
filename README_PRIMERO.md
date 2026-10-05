@@ -1,53 +1,56 @@
-# KORAVERSE 4.0 — Antes de subir a GitHub
+# KORAVERSE 4.1 — ACTUALIZACIÓN RÁPIDA
 
-Esta versión es una actualización directa de KORAVERSE 3.0. Conserva los juegos existentes y añade el **Premium Social Core**.
+Esta versión se instala **encima de KORAVERSE 4.0**. No borres tus datos.
 
-## 1. Ejecuta primero la migración de Supabase
+## 1. Supabase
 
-En Supabase abre **SQL Editor → New Query** y ejecuta completo:
+Abre **SQL Editor → New query** y ejecuta completo:
 
-`supabase/migration_v4.sql`
+`supabase/migration_v4_1.sql`
 
-Esta migración:
-- agrega `trivia_xp`, `avatar_id`, `status_message` y `last_seen` a los perfiles;
-- crea `koraverse_messages` para chat e invitaciones persistentes.
+Debe terminar con `Success. No rows returned` o un mensaje equivalente.
 
-Debe terminar con `Success. No rows returned`.
+La migración:
+- agrega tema e idioma al perfil;
+- crea el bucket `koraverse-sketches` para los dibujos del chat;
+- no borra XP, mensajes, perfiles ni progreso anterior.
 
-## 2. Sube el contenido del ZIP a la raíz del repo KoraVerse
+## 2. GitHub
 
-Reemplaza los archivos existentes manteniendo esta estructura:
+Reemplaza el contenido de tu repo `KoraVerse` por este proyecto y haz commit en `main`.
 
-- `index.html`
-- `package.json`
-- `vercel.json`
-- `src/`
-- `public/`
-- `api/`
-- `supabase/`
-
-No subas la carpeta contenedora ni el ZIP como un archivo único.
+No subas `.env` ni claves reales. `.env.example` sí puede publicarse.
 
 ## 3. Vercel
 
-Las variables existentes siguen siendo válidas:
+Las variables existentes siguen funcionando:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_KEY`
 
-No necesitas crear otro proyecto Vercel. El commit a `main` debe generar el deployment automáticamente.
+Vercel detectará el commit y desplegará automáticamente.
 
-## 4. Qué probar después del deployment
+## 4. Qué probar
 
-1. Entra como Carlos y desde otro navegador/móvil como Kora.
-2. Confirma que el indicador junto al nombre del otro pase a **online**.
-3. Abre el botón de chat 💬 en ambos equipos y envía mensajes.
-4. Entra a **Avatar Studio** y selecciona una vaquita/animal.
-5. Vuelve al Command Center y observa cómo la esfera central alterna entre **nivel → avatar → estado**.
-6. Abre **Trivia Universe** y juega una ronda Solo.
-7. En Chill → Coffee Break pulsa **Vamos por un café** y confirma que la invitación aparece en el chat de la otra persona.
-8. Prueba Duo Realm para verificar que los modos previos continúan funcionando.
+1. Portada galáctica y selección de jugador.
+2. Avatar Studio: los personajes deben verse grandes y de cuerpo completo.
+3. Perfil → cambia el tema y recarga: debe conservarse.
+4. Chat → escribe desde dos dispositivos, verifica online/typing y `Limpiar chat`.
+5. Sketch Pad → dibuja y usa **“Mira lo que dibujé”**.
+6. Duo Realm → **Chess Duo Lab**.
+7. En el perfil Kora, `Guíame` está activado por defecto en ajedrez; puede apagarse.
+8. `Ctrl + Espacio` activa/desactiva Modo Discreto.
+9. Revisa desktop y móvil.
 
-## Nota de privacidad
+## Chess Duo Lab
 
-KORAVERSE sigue usando perfiles por enlace y no Supabase Auth. El chat es adecuado para este proyecto privado/experimental, pero no debe tratarse como mensajería cifrada o de alta privacidad. Para privacidad fuerte, una fase futura debe añadir autenticación real y políticas RLS por usuario.
+El tablero usa un motor de reglas local incluido en `src/chess-engine.js` (sin dependencia externa):
+- turnos;
+- movimientos legales;
+- jaque / jaque mate;
+- tablas;
+- enroque;
+- promoción;
+- captura al paso.
+
+`Guíame` muestra movimientos legales y recomendaciones pedagógicas. No usa un motor competitivo externo: las sugerencias son ayudas simples para aprender, no análisis de gran maestro.

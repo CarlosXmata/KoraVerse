@@ -1,5 +1,5 @@
 {
-  "name": "KORAVERSE — Premium Social Core",
+  "name": "KORAVERSE 4.1 — Premium Social Expansion",
   "short_name": "KORAVERSE",
   "start_url": "/",
   "display": "standalone",
@@ -7,6 +7,11 @@
   "theme_color": "#0a0d18",
   "description": "Juegos, inglés, puzzles y experiencias Duo en un pequeño universo privado.",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ]
 }

@@ -1,33 +1,29 @@
-# KORAVERSE Changelog
+# KORAVERSE 4.1 — Premium Polish & Social Expansion
 
-## 4.0.0 — Premium Social Core
+## Nuevo
+- Responsive rediseñado para monitor, laptop, tablet y móvil.
+- Escala tipográfica fluida con `clamp()`.
+- Landing cinematográfica con galaxia, naves y vacas alienígenas.
+- Avatares SVG originales de cuerpo completo para vaquitas, animales, escritores y arquetipos.
+- Esfera central de cinco estados: Nivel → Avatar → Estado → XP → Racha.
+- Perfil vivo con escena de avatar, métricas, actividad reciente y selector de 8 temas.
+- Español por defecto + selector ES/EN para navegación principal.
+- Chat 2.0: presencia, typing, limpiar para mí, accesos rápidos y dibujos.
+- Sketch Pad con color, grosor, borrador, guardar y enviar al chat.
+- Supabase Storage para dibujos con fallback local.
+- Chess Duo Lab con reglas reales y modo Guíame.
+- Lección rápida de piezas y fundamentos de ajedrez.
+- Modo Discreto con `Ctrl + Espacio`.
 
-### Nuevo
-- Avatar Studio con colecciones Cows, Animals, Writers y Screen Archetypes originales.
-- Vaquitas seleccionables y desbloqueables por XP.
-- Esfera central viva que alterna automáticamente Level / Avatar / Online Status.
-- Presencia global online/offline con Supabase Realtime Presence.
-- KORAVERSE Chat en tiempo real con historial persistente en Supabase.
-- Quick messages y accesos rápidos desde el chat.
-- Coffee Signal: “Vamos por un café”, postre, paseo, conversación, canción o mini break.
-- Trivia Universe visible en Solo Mode y conservada en Duo Mode.
-- Trivia XP individual y rondas Solo de 10 preguntas.
-- Chill Zone expandida con Rain Room, Mood Orbit y Quiet Library.
-- Avatares visibles en perfil, podio y lobby Duo.
-
-### Conservado
+## Conservado
 - English Lab.
-- Sudoku Solo y Duo.
+- Trivia Solo/Duo.
+- Sudoku Solo/Duo.
+- Case Invaders.
 - Memory Reactor.
 - 30 Second Chaos.
-- Case Invaders Solo y Duo.
 - Same Brain.
 - Mission Control.
 - Case Arena / Lic. Urgentísimo.
-- The Garden.
-- Star Drift.
-- KORA SIGNAL y soporte opcional de Push Notifications.
-- Nueva partida / nuevo código de sala.
-
-### Base de datos
-Ejecutar `supabase/migration_v4.sql` sobre una instalación 3.0 existente.
+- Garden, Star Drift, Coffee Break, Rain Room y Quiet Library.
+- Kora Signal, XP, podium y Realtime.

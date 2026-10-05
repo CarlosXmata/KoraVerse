@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 620">
+    <defs><filter id="s"><feDropShadow dx="0" dy="16" stdDeviation="14" flood-opacity=".25"/></filter><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#458772" stop-opacity=".22"/><stop offset="1" stop-color="#7ce3a7" stop-opacity=".08"/></linearGradient></defs>
+    <ellipse cx="210" cy="590" rx="120" ry="20" fill="#040712" opacity=".45"/>
+    <circle cx="210" cy="240" r="185" fill="url(#bg)" opacity=".5"/>
+    <g><path d="M171 246 Q210 226 249 246 L280 397 Q264 428 239 433 H181 Q156 428 140 397Z" fill="#458772"/>
+    <path d="M176 253 Q210 272 244 253 L233 382 H187Z" fill="#25483d" opacity=".95"/>
+    <path d="M143 271 Q110 292 95 356" fill="none" stroke="#458772" stroke-width="28" stroke-linecap="round"/><path d="M277 271 Q310 292 325 356" fill="none" stroke="#458772" stroke-width="28" stroke-linecap="round"/>
+    <circle cx="94" cy="361" r="17" fill="#d7a17f"/><circle cx="326" cy="361" r="17" fill="#d7a17f"/>
+    <path d="M177 427 L167 560" stroke="#252b42" stroke-width="37" stroke-linecap="round"/><path d="M243 427 L253 560" stroke="#252b42" stroke-width="37" stroke-linecap="round"/>
+    <path d="M142 573 Q165 548 191 570 L188 593 H135Z" fill="#ececf4"/><path d="M229 570 Q255 548 278 573 L285 593 H232Z" fill="#ececf4"/>
+    <path d="M183 252 L210 292 L237 252" fill="#ffffff" opacity=".84"/><circle cx="210" cy="326" r="6" fill="#7ce3a7"/><circle cx="210" cy="350" r="6" fill="#7ce3a7"/><path d="M144 140 Q132 74 177 56 Q226 36 269 73 Q294 95 278 151 L263 124 Q252 92 218 88 Q175 84 158 124Z" fill="#251b25"/>
+        <path d="M152 117 Q137 194 166 235" fill="none" stroke="#251b25" stroke-width="21" stroke-linecap="round"/><ellipse cx="210" cy="153" rx="67" ry="80" fill="#d7a17f"/>
+        <ellipse cx="181" cy="153" rx="8" ry="10" fill="#2a2730"/><ellipse cx="239" cy="153" rx="8" ry="10" fill="#2a2730"/>
+        <path d="M187 195 Q210 207 233 195" fill="none" stroke="#ad6668" stroke-width="5" stroke-linecap="round"/>
+        <path d="M168 136 Q181 127 194 136 M226 136 Q239 127 252 136" fill="none" stroke="#59433e" stroke-width="4" stroke-linecap="round"/>
+        <g fill="none" stroke="#242832" stroke-width="5"><rect x="158" y="139" width="48" height="35" rx="14"/><rect x="214" y="139" width="48" height="35" rx="14"/><path d="M206 152 H214"/></g><g transform="translate(290 332)"><circle cx="28" cy="28" r="27" fill="#e9f3f5" stroke="#7ce3a7" stroke-width="5"/><path d="M28 9 V29 L42 38" fill="none" stroke="#222834" stroke-width="4" stroke-linecap="round"/></g></g></svg>
