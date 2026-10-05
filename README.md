@@ -1,124 +1,256 @@
-# KORAVERSE Duo Realtime
+# KORAVERSE 3.0 — Duo Universe
 
-Versión multijugador para **2 personas** del KORAVERSE original.
+Una evolución completa del KORAVERSE original: juegos Solo y Duo, XP persistente, podio, English Lab, Sudoku, Case Invaders, KORA SIGNAL, PWA y mundos visuales.
 
-- Publicable en Vercel.
-- Sin base de datos ni SQL.
-- Usa **Supabase Realtime Broadcast + Presence**.
-- Funciona desde la misma red o desde redes distintas.
-- Sala de 6 caracteres + enlace de invitación.
-- Trivias con respuestas ocultas hasta que ambos contestan.
-- Sync Mode real.
-- Misiones con validación desde la pantalla del cómplice.
-- Case Arena cooperativo.
-- Boss con HP compartido.
-- Garden desbloqueable.
-- Reconexión del anfitrión mediante estado guardado en su navegador.
+## Qué incluye esta versión
 
-## 1. Crear Supabase
+### Command Center
+- Entrada por perfil: Kora / Carlos / otro.
+- Nivel personal, XP, racha y progreso por categoría.
+- Podio de experiencia.
+- Duo XP compartido.
+- Quick Play de 5 minutos.
+- Invitación KORA SIGNAL.
 
-1. Entra a https://supabase.com y crea un proyecto.
-2. Abre **Connect** o **Project Settings > API**.
-3. Copia:
-   - Project URL
-   - Publishable key (`sb_publishable_...`).
-4. En **Realtime Settings**, mantén habilitado el acceso a canales públicos.
+### Solo Mode
+- **English Lab**: ruta A1 → A2 → B1 con temas fundamentales.
+- **Sudoku**.
+- **Case Invaders**: juego Canvas con nave y casos.
+- **Memory Reactor**.
+- **30 Second Chaos**.
+- **The Garden**.
+- **Star Drift**.
+- **Coffee Break**.
 
-No necesitas crear tablas, ejecutar SQL ni habilitar Postgres Changes.
+### Duo Realm
+- Salas privadas con código.
+- Presence + Broadcast de Supabase Realtime.
+- Trivia Realm.
+- Same Brain / Sync Mode evolucionado.
+- Mission Control.
+- Sudoku Duo compartido.
+- Classic Case Arena.
+- Boss final Lic. Urgentísimo.
+- The Garden como recompensa.
+- Case Invaders Duo Raid.
+- Nueva sala / nuevo código.
 
-## 2. Configuración local
+### English Lab
+El currículo incluido trabaja temas concretos y estables:
 
-Copia `.env.example` como `.env.local` y reemplaza los valores:
+- Verb to be.
+- Personal pronouns.
+- Present Simple.
+- Do / Does.
+- There is / There are.
+- Can / Can't.
+- Past Simple.
+- Future: will / going to.
+- Comparatives.
+- Frequency.
+- Everyday conversation.
+- English at work.
 
-```env
-VITE_SUPABASE_URL=https://TU-PROYECTO.supabase.co
-VITE_SUPABASE_KEY=sb_publishable_TU_CLAVE
+Los ejercicios incorporados sirven de base. Además, la app consulta `koraverse_english_content` de Supabase. Puedes añadir ejercicios nuevos a esa tabla y aparecerán en la aplicación sin volver a desplegar el front-end.
+
+---
+
+# Actualizar desde KORAVERSE 2.x
+
+## A. Supabase
+
+No crees un proyecto nuevo.
+
+En tu proyecto actual:
+
+1. `SQL Editor`
+2. `New query`
+3. pega `supabase/schema.sql`
+4. pulsa `Run`
+
+No borra tus tablas ajenas. Solo crea las tablas `koraverse_*` si no existen.
+
+## B. GitHub
+
+La opción recomendada es reemplazar los archivos del repositorio actual con esta versión.
+
+Estructura esperada:
+
+```text
+KoraVerse/
+├── api/
+│   ├── kora-signal.js
+│   └── push-subscribe.js
+├── public/
+│   ├── icon.svg
+│   ├── manifest.webmanifest
+│   └── sw.js
+├── src/
+│   ├── data.js
+│   ├── main.js
+│   └── style.css
+├── supabase/
+│   └── schema.sql
+├── .env.example
+├── .gitignore
+├── .nvmrc
+├── index.html
+├── package.json
+├── README.md
+├── README_PRIMERO.md
+└── vercel.json
 ```
 
-Luego:
+Una vez hagas commit a `main`, Vercel debe iniciar un deployment automáticamente.
+
+## C. Variables de Vercel
+
+Las dos variables que ya utilizabas siguen siendo suficientes para el juego normal:
+
+```text
+VITE_SUPABASE_URL=https://xxxxxxxx.supabase.co
+VITE_SUPABASE_KEY=sb_publishable_xxxxxxxxx
+```
+
+No pongas claves `service_role` en variables que comiencen con `VITE_`.
+
+---
+
+# XP y perfiles
+
+Los perfiles se identifican por `player_key`:
+
+- `Kora` → `kora`
+- `Carlos` → `carlos`
+
+Por eso, si Kora entra desde otro dispositivo y selecciona **Kora**, recuperará el mismo XP guardado en Supabase.
+
+No hay autenticación ni contraseña en esta versión: es un universo privado por enlace, no un sistema de cuentas seguro. No uses estas tablas para información sensible.
+
+XP se almacena en:
+
+- `koraverse_profiles`
+- `koraverse_activity`
+- `koraverse_duo`
+
+---
+
+# KORA SIGNAL
+
+## Modo estándar — ya funciona
+
+Al pulsar `Invitar a Kora` o `Invitar a Carlos`:
+
+1. se envía un Broadcast de Supabase Realtime;
+2. si el otro tiene KORAVERSE abierto, recibe la señal al instante;
+3. si permitió notificaciones, el Service Worker muestra una notificación mientras la app/navegador está disponible;
+4. también se guarda una señal en `koraverse_signals`, por lo que puede verse al entrar luego.
+
+## Push notifications avanzadas — incluso con KORAVERSE cerrado
+
+El proyecto ya incluye los endpoints:
+
+- `/api/push-subscribe`
+- `/api/kora-signal`
+
+Para activarlos necesitas VAPID + una Service Role Key **solo en el servidor**.
+
+### 1. Generar VAPID keys
+
+En una PC con Node puedes ejecutar:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Obtendrás una Public Key y Private Key.
+
+### 2. Añadir variables en Vercel
+
+Añade:
+
+```text
+VITE_VAPID_PUBLIC_KEY=<PUBLIC KEY>
+VAPID_PUBLIC_KEY=<PUBLIC KEY>
+VAPID_PRIVATE_KEY=<PRIVATE KEY>
+SUPABASE_SERVICE_ROLE_KEY=<SERVICE ROLE KEY DE SUPABASE>
+```
+
+Importante:
+
+- `VITE_VAPID_PUBLIC_KEY` puede ir al navegador.
+- `VAPID_PRIVATE_KEY` NO.
+- `SUPABASE_SERVICE_ROLE_KEY` NO.
+- Nunca pongas las dos últimas con prefijo `VITE_`.
+
+### 3. Redeploy
+
+Después de crear variables nuevas, haz un Redeploy.
+
+### 4. Activar alertas en cada dispositivo
+
+En English Lab hay un botón `Activar alertas`; puedes moverlo luego a Settings si quieres. Cada jugador debe conceder permiso una vez en su propio navegador/dispositivo.
+
+---
+
+# English Lab actualizado sin redeploy
+
+Puedes insertar contenido nuevo en `koraverse_english_content`.
+
+Ejemplo conceptual:
+
+```sql
+insert into public.koraverse_english_content
+(lesson_id, level, topic, kind, prompt, options, answer, explanation)
+values
+(
+  'a1-present',
+  'A1',
+  'Present Simple',
+  'mcq',
+  'He ___ to work at 8.',
+  '["go", "goes", "going", "went"]'::jsonb,
+  '1'::jsonb,
+  'Con he/she/it, el verbo normalmente lleva -s.'
+);
+```
+
+La siguiente vez que el navegador consulte el contenido, ese ejercicio entra al pool de la unidad correspondiente.
+
+---
+
+# Desarrollo local
 
 ```bash
 npm install
 npm run dev
 ```
 
-Vite mostrará una URL local, normalmente `http://localhost:5173`.
-
-## 3. Publicar en Vercel
-
-### Opción recomendada: GitHub + Vercel
-
-1. Sube esta carpeta a un repositorio de GitHub.
-2. En Vercel selecciona **Add New > Project** e importa el repositorio.
-3. Framework Preset: **Vite**.
-4. Agrega estas variables de entorno:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_KEY`
-5. Build Command: `npm run build`.
-6. Output Directory: `dist`.
-7. Pulsa **Deploy**.
-
-### Opción CLI
+Build:
 
 ```bash
-npm install
 npm run build
-npx vercel
 ```
 
-Después configura las dos variables de entorno en el proyecto de Vercel y vuelve a desplegar.
-
-## 4. Cómo jugar
-
-### Carlos / anfitrión
-
-1. Abre la URL publicada.
-2. Escribe tu nombre.
-3. Pulsa **Crear partida**.
-4. Copia el enlace de invitación.
-5. Envíalo a la otra persona.
-6. Cuando aparezcan 2 jugadores conectados, pulsa **Entrar al KORAVERSE**.
-
-### Segundo jugador
-
-1. Abre el enlace recibido.
-2. Escribe su nombre.
-3. Pulsa **Entrar**.
-4. Queda conectado a la misma sala.
-
-## 5. Arquitectura
+Vercel debe usar:
 
 ```text
-Vercel
-  └─ Vite app
-      ├─ Navegador A
-      ├─ Navegador B
-      └─ Supabase Realtime
-           ├─ Presence: quién está conectado
-           └─ Broadcast: respuestas, estado, golpes y validaciones
+Framework: Vite
+Build Command: npm run build
+Output Directory: dist
 ```
 
-El anfitrión funciona como autoridad de la partida y distribuye el estado a la segunda pantalla. El estado maestro se guarda además en `localStorage` del navegador anfitrión para recuperarlo tras una recarga accidental.
+---
 
-## 6. Privacidad de la sala
+# Notas de diseño
 
-Esta versión utiliza canales Realtime públicos protegidos únicamente por un código de sala aleatorio de 6 caracteres. Es apropiado para este juego casual y no almacena información sensible.
+KORAVERSE 3.0 prioriza:
 
-No uses este mecanismo para información corporativa confidencial, credenciales o datos personales sensibles. Si más adelante quieres salas con autenticación real, se puede migrar a canales privados con Supabase Auth y políticas RLS.
+- animaciones CSS ligeras;
+- Canvas solo en Case Invaders;
+- diseño responsive;
+- sonidos generados con Web Audio sin archivos externos;
+- Realtime para acciones rápidas;
+- base de datos para progreso persistente;
+- funcionamiento degradado local si aún no ejecutaste el SQL.
 
-## 7. Archivos principales
-
-- `src/main.js`: multijugador, salas, sincronización y lógica del juego.
-- `src/data.js`: preguntas, misiones y frases.
-- `src/style.css`: diseño visual del KORAVERSE.
-- `vercel.json`: fallback SPA para Vercel.
-- `.env.example`: variables requeridas.
-- `KORAVERSE-original.html`: copia de tu versión original como respaldo.
-
-## 8. Nota sobre reconexión
-
-- Si el **segundo jugador** recarga, solicita nuevamente el estado al anfitrión.
-- Si el **anfitrión** recarga, restaura el último estado guardado localmente y vuelve a publicarlo.
-- Si el anfitrión cierra la sala definitivamente, el segundo jugador debe esperar a que vuelva a conectarse.
-
-KORAVERSE deployed with Vercel.

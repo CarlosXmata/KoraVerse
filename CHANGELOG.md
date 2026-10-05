@@ -1,0 +1,31 @@
+# KORAVERSE 3.0 — What's new
+
+- Nuevo Command Center animado.
+- Perfiles persistentes con XP, niveles y racha.
+- Podio Carlos/Kora + Duo XP.
+- Solo Mode real.
+- English Lab A1 → A2 → B1.
+- Daily English Quest.
+- Contenido English extensible desde Supabase.
+- Sudoku Solo.
+- Sudoku Duo sincronizado.
+- Case Invaders Canvas (navecita destruyendo casos).
+- Case Invaders Duo Raid.
+- Memory Reactor.
+- 30 Second Chaos.
+- Trivia Realm sincronizado.
+- Same Brain.
+- Mission Control.
+- Classic Case Arena + Lic. Urgentísimo.
+- The Garden renovado.
+- Star Drift.
+- Coffee Break.
+- KORA SIGNAL en Realtime.
+- Señales pendientes guardadas en Supabase.
+- Notificaciones del navegador.
+- Backend opcional para Web Push real con la app cerrada.
+- PWA instalable.
+- Reconexión de sala y estado de host guardado localmente.
+- Nueva partida / nuevo código.
+- Sonido generado con Web Audio y control ON/OFF.
+- UI responsive móvil/escritorio.
