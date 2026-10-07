@@ -1,0 +1,51 @@
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +1
++
+Progress: resolved 1, reused 1, downloaded 0, added 0, done
+npm notice run koraverse@5.1.0 test
+npm notice run node --test tests/*.test.js
+✔ the Carlos narrative has eleven bilingual chapters and lasts between two and four minutes (31.2446ms)
+✔ birth year is unknown unless explicitly supplied; previews never mutate the narrative (5.5434ms)
+✔ arrival is exact, recognition approximate, and configured corrections reach both labels and prose (9.8463ms)
+✔ the clock supports pause, hidden tabs, chapter skips, jumps, end and restart (1.1827ms)
+✔ the mythical archive covers every year from 2000 to 2027, with bilingual fiction (0.7389ms)
+✔ a silent date still shows its year myth; exact and cumulative memories stay independent (0.5118ms)
+✔ special coordinates are literary content rather than fabricated real memories (0.1761ms)
+✔ Atlas presents real memories first, escapes content and labels the prophecy unconfirmed (0.4119ms)
+✔ reduced motion keeps the whole story, freezes on pause and restores focus and the page on exit (4.2369ms)
+✔ unlock requires the owner Auth user, valid private key, rate allowance and same origin (203.6365ms)
+✔ private endpoints reject expired or revoked sessions; universe state persists and wakes (4.9729ms)
+✔ preview birthday mode cannot write receipts, and unknown milestones fail closed (32.4392ms)
+✔ opening has 20 legal moves and Fool’s Mate ends the game (11.4193ms)
+✔ castling moves the rook and king (2.9986ms)
+✔ en passant removes the passed pawn and promotion creates a queen (1.7928ms)
+✔ hidden door requires a four-second hold and cancels early release or disallowed players (0.7237ms)
+✔ film pauses in hidden state, finishes once and reduced motion uses the short sequence (0.6942ms)
+✔ roses save each opening once, refuse false progress on failure, and preview never writes (0.8567ms)
+✔ avatars inhabit reading, coffee, chess, signals, birthday, celebration and sleeping scenes (1.3255ms)
+✔ Santo Domingo dates cross midnight at 04:00 UTC, including all event phases (24.1243ms)
+✔ manual modes, automatic restoration, server clock and future events (3.4129ms)
+✔ cinematic stages, reduced motion, vector hats and ten unique roses (0.3596ms)
+✔ Atlas exact and cumulative searches never create stars; dates are calendar-valid (3.1275ms)
+✔ resonance distinguishes text, sketches, coffee, games and system events (0.3802ms)
+✔ private key validity, signed session tampering, expiry, rotation and secure cookies (204.0757ms)
+✔ diary encrypts titles, tags and body; wrong key, owner and entry ID cannot decrypt (256.5905ms)
+✔ V5.1 migration executes twice, preserves V5 memories and denies public private access (2919.7528ms)
+✔ Service Worker never displays private payload text or navigates to an external URL (5.1738ms)
+✔ authorized QA isolates rewards, profiles, social, push, storage and room access (48.3504ms)
+✔ non-admin Auth user cannot activate QA (1.8905ms)
+✔ chat is not displayed or broadcast when database rejects persistence (2.2617ms)
+✔ chat confirms persistence before broadcasting and deduplicates echoed INSERT (3.8511ms)
+✔ DB INSERT and broadcast produce exactly one message, ordered by creation (1.9062ms)
+✔ persisted row replaces its same client id (0.302ms)
+✔ multi-tab presence selects active session and expires disconnected devices (5.2803ms)
+✔ the narrative expansion preserves original games, classic modes, 10/10, security, Sanctuary, SQL and Realtime byte for byte (11.2967ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3661.6219
+

@@ -1,0 +1,10 @@
+npm run build
+Exit code: 0
+✓ 69 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.67 kB │ gzip:   0.40 kB
+dist/assets/index-mTgToy8f.css  120.01 kB │ gzip:  26.72 kB
+dist/assets/index-Di6pGWT8.js   456.52 kB │ gzip: 140.09 kB
+✓ built in 2.78s
+
