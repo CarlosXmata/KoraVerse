@@ -1,0 +1,34 @@
+✔ unlock requires the owner Auth user, valid private key, rate allowance and same origin (113.7244ms)
+✔ private endpoints reject expired or revoked sessions; universe state persists and wakes (1.1099ms)
+✔ preview birthday mode cannot write receipts, and unknown milestones fail closed (11.0423ms)
+✔ opening has 20 legal moves and Fool’s Mate ends the game (2.5068ms)
+✔ castling moves the rook and king (0.4514ms)
+✔ en passant removes the passed pawn and promotion creates a queen (1.1418ms)
+✔ hidden door requires a four-second hold and cancels early release or disallowed players (0.5311ms)
+✔ film pauses in hidden state, finishes once and reduced motion uses the short sequence (0.5827ms)
+✔ roses save each opening once, refuse false progress on failure, and preview never writes (0.6446ms)
+✔ avatars inhabit reading, coffee, chess, signals, birthday, celebration and sleeping scenes (0.3713ms)
+✔ Santo Domingo dates cross midnight at 04:00 UTC, including all event phases (1.1821ms)
+✔ manual modes, automatic restoration, server clock and future events (0.8727ms)
+✔ cinematic stages, reduced motion, vector hats and ten unique roses (0.1516ms)
+✔ Atlas exact and cumulative searches never create stars; dates are calendar-valid (1.0941ms)
+✔ resonance distinguishes text, sketches, coffee, games and system events (0.141ms)
+✔ private key validity, signed session tampering, expiry, rotation and secure cookies (106.5269ms)
+✔ diary encrypts titles, tags and body; wrong key, owner and entry ID cannot decrypt (154.8305ms)
+✔ V5.1 migration executes twice, preserves V5 memories and denies public private access (1918.3223ms)
+✔ Service Worker never displays private payload text or navigates to an external URL (3.8378ms)
+✔ authorized QA isolates rewards, profiles, social, push, storage and room access (24.5824ms)
+✔ non-admin Auth user cannot activate QA (2.0657ms)
+✔ chat is not displayed or broadcast when database rejects persistence (2.5892ms)
+✔ chat confirms persistence before broadcasting and deduplicates echoed INSERT (4.7672ms)
+✔ DB INSERT and broadcast produce exactly one message, ordered by creation (3.2998ms)
+✔ persisted row replaces its same client id (0.5463ms)
+✔ multi-tab presence selects active session and expires disconnected devices (0.4368ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2611.0443

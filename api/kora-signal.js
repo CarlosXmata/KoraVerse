@@ -16,8 +16,9 @@ export default async function handler(req,res){
   if(error) return res.status(500).json({error:error.message})
   const isCoffee=kind==='coffee'
   const payload=JSON.stringify({
-    title:isCoffee?'COFFEE SIGNAL ☕':'KORA SIGNAL ✨',
-    body:message||`${from_name||from_player} quiere jugar contigo.`,
+    title:isCoffee?'KORA-Señal':'Vaca-Señal',
+    body:'Hay una señal esperándote en KORAVERSE.',
+    kind:isCoffee?'coffee_invite':'game_invite',
     url:'/'
   })
   let sent=0

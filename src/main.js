@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { Chess } from './chess-engine.js'
 import './style.css'
 import './v5.css'
+import './living-sky.css'
+import { createLivingSky } from './living-sky.js'
 import { Ambient } from './ambient.js'
 import { mergeMessages, latestPresence } from './social-utils.js'
 import {
@@ -125,9 +127,9 @@ function chatLimpiarCutoff(){return Number(localStorage.getItem(CHAT_CLEAR_PREFI
 function rerenderPrimary(){applyTheme();if(WORLDS[state.screen])return renderPlanet(state.screen);if(state.screen==='settings')return renderSettings();if(state.screen==='qa')return renderQA(); if(!state.profile)return renderGate(); if(state.screen==='profile')return renderProfile(); if(state.screen==='avatars')return renderAvatarStudio(); return renderHome()}
 
 const avatarById = id => avatarCatalog.find(a=>a.id===id) || avatarCatalog[0]
-function avatarVisual(id, size='md'){
+function avatarVisual(id, size='md', player=state.profile?.player_key){
   const a=avatarById(id)
-  return `<span class="avatar-visual ${size}" style="--avatar-accent:${a.accent}"><img src="${a.image||''}" alt="${esc(a.name)}" loading="lazy"><span class="avatar-fallback">${a.icon}</span><span class="avatar-badge">${a.badge}</span></span>`
+  return `<span class="avatar-visual ${size}" style="--avatar-accent:${a.accent}"><img src="${a.image||''}" alt="${esc(a.name)}" loading="lazy"><span class="avatar-fallback">${a.icon}</span><span class="avatar-badge">${a.badge}</span>${sky.adornment(player,size)}</span>`
 }
 function socialPresenceList(){return [...Object.values(state.social.presence||{}).flat(),...(state.social.fallback||[])]}
 function partnerPresence(){if(QA.active)return QA.presence || null; return latestPresence(socialPresenceList(), otherDefault())}
@@ -135,7 +137,7 @@ function partnerIsOnline(){return Boolean(partnerPresence())}
 function partnerLabel(){const key=otherDefault();return state.profiles.find(p=>p.player_key===key)?.display_name || (key==='kora'?'Kora':'Carlos')}
 function formatClock(v){try{return new Date(v).toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}catch{return ''}}
 
-function setTimer(fn, ms) { const timer={remaining:ms,last:Date.now(),id:null};const tick=()=>{const now=Date.now();if(!document.hidden&&!state.discreet)timer.remaining-=now-timer.last;timer.last=now;if(timer.remaining<=0){state.timers.delete(timer);fn()}else timer.id=setTimeout(tick,Math.min(250,timer.remaining))};timer.id=setTimeout(tick,Math.min(250,ms));state.timers.add(timer);return timer }
+function setTimer(fn, ms) { const timer={remaining:ms,last:Date.now(),id:null};const tick=()=>{const now=Date.now();if(!document.hidden&&!state.discreet&&!(['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)))timer.remaining-=now-timer.last;timer.last=now;if(timer.remaining<=0){state.timers.delete(timer);fn()}else timer.id=setTimeout(tick,Math.min(250,timer.remaining))};timer.id=setTimeout(tick,Math.min(250,ms));state.timers.add(timer);return timer }
 function clearTimers(){window.onkeydown=null;window.onkeyup=null;if(state.invaders)state.invaders.active=false; for(const id of state.timers){clearTimeout(id?.id||id);clearInterval(id?.id||id)}; state.timers.clear(); if(state.raf) cancelAnimationFrame(state.raf); state.raf=null }
 
 function beep(type='soft') {
@@ -217,8 +219,8 @@ function socialDockMarkup(){
     <p class="chat-connection" id="chatConnection">${socialConnectionLabel()}</p><div class="social-quick">
       <button data-action="send-signal">✨ ¿Jugamos?</button>
       <button data-action="coffee-invite" data-coffee="coffee">☕ Café</button>
-      <button data-action="quick-chat" data-message="¿Ajedrez? ♟️">♟️ Ajedrez</button>
-      <button data-action="quick-chat" data-message="¿Sudoku? 🧩">🧩 Sudoku</button>
+      <button data-action="quick-chat" data-game="chess" data-message="¿Ajedrez? ♟️">♟️ Ajedrez</button>
+      <button data-action="quick-chat" data-game="sudoku" data-message="¿Sudoku? 🧩">🧩 Sudoku</button>
     </div>
     <div class="social-messages" id="socialMessages">${renderChatMessages()}</div>
     <div id="typingLine" class="typing-line ${state.social.typing?'show':''}">${state.social.typing?`${esc(label)} ${tr('typing')}`:''}</div>
@@ -236,7 +238,7 @@ function refreshSocialDock(){
 async function updatePresence(screen=state.screen){
   if(!state.profile||QA.active)return
   state.currentWorld=screen
-  const status=document.hidden||state.discreet||Date.now()-lastInteraction>90000?'idle':'online'
+  const status=(document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus))||Date.now()-lastInteraction>90000?'idle':'online'
   const payload={session_id:sessionId,player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',screen,current_world:screen,status,last_seen:new Date().toISOString(),last_activity:new Date(lastInteraction).toISOString()}
   if(state.social.connected)await state.social.channel?.track(payload).catch(()=>{})
   if(state.dbReady&&Date.now()-(state.social.lastHeartbeat||0)>20000){
@@ -263,7 +265,7 @@ function receiveChatMessage(msg){
   if(!((msg.from_player===me&&msg.to_player===other)||(msg.from_player===other&&msg.to_player===me)))return
   if(state.social.messages.some(x=>(msg.id&&String(x.id)===String(msg.id))||(msg.client_id&&x.client_id===msg.client_id)))return
   state.social.messages=mergeMessages(state.social.messages,[msg])
-  if(msg.from_player!==me&&!state.social.open){state.social.unread++;if(!['minute','library','rain-room'].includes(state.screen)){toast(msg.kind==='coffee_invite'?msg.body:`${partnerLabel()}: ${msg.body}`,'signal');beep('signal')}}
+  if(msg.from_player!==me&&!state.social.open){state.social.unread++;if(!['minute','library','rain-room'].includes(state.screen)){sky.receive(msg);beep('signal')}}
   refreshSocialDock()
 }
 async function setupSocialLayer(){
@@ -347,9 +349,9 @@ function shell(content,{world='home',back=null}={}){
     </header>
     <main class="main-wrap">
       ${back?`<button class="back-v3" data-action="${back.action}" ${back.world?`data-world="${back.world}"`:''}>← ${back.label==='Command Center'?(state.lang==='es'?'Entre mundos':'Between worlds'):back.label}</button>`:''}
-      ${content}
+      ${content}${world==='home'&&state.screen==='home'?sky.homeMarkup():''}
     </main>
-    ${socialDockMarkup()}
+    ${socialDockMarkup()}${sky.decorations(world)}
     <button class="kora-orb" data-action="kora-tip"><span>🐮</span><i></i></button>
   </div>`
 }
@@ -541,7 +543,7 @@ function podiumBlock(){
   </section>`
 }
 
-function renderHome(){renderUniverseHome()}
+function renderHome(){return sky.enterHome()}
 
 function renderWorld(world){
   if(WORLDS[world])return renderPlanet(world)
@@ -681,7 +683,7 @@ function flipMemory(index){const m=state.memory;if(m.lock)return;const card=m.de
 
 // ---------- CHAOS ----------
 function startCaos(){state.chaos={score:0,end:Date.now()+30000,active:true};renderCaos();setTimer(()=>finishCaos(),30000);spawnCaosTarget()}
-function renderCaos(){const remain=Math.max(0,Math.ceil(((state.chaos?.end||Date.now())-Date.now())/1000));app.innerHTML=shell(`<section class="game-header"><div><small>ARCADE · ${state.lang==='es'?'CAOS DE 30 SEGUNDOS':'30 SECOND CHAOS'}</small><h1>${state.lang==='es'?'Atrapa lo urgente.':'Catch the urgent.'}</h1><p>Haz clic en cada “urgente” antes de que cambie de lugar. Sí, esto cuenta como terapia.</p></div><div class="game-stat"><small>${state.lang==='es'?'PUNTOS':'SCORE'}</small><b id="chaosScore">${state.chaos.score}</b></div></section><div class="chaos-arena" id="chaosArena"><div class="chaos-time"><span id="chaosTime">${remain}</span>s</div></div>`,{world:'arcade',back:{action:'world',world:'arcade',label:'Arcade'}});const tick=setInterval(()=>{const el=document.querySelector('#chaosTime');if(!el){clearInterval(tick);return}if(document.hidden||state.discreet)return;el.textContent=Math.max(0,Math.ceil((state.chaos.end-Date.now())/1000))},250);state.timers.add(tick)}
+function renderCaos(){const remain=Math.max(0,Math.ceil(((state.chaos?.end||Date.now())-Date.now())/1000));app.innerHTML=shell(`<section class="game-header"><div><small>ARCADE · ${state.lang==='es'?'CAOS DE 30 SEGUNDOS':'30 SECOND CHAOS'}</small><h1>${state.lang==='es'?'Atrapa lo urgente.':'Catch the urgent.'}</h1><p>Haz clic en cada “urgente” antes de que cambie de lugar. Sí, esto cuenta como terapia.</p></div><div class="game-stat"><small>${state.lang==='es'?'PUNTOS':'SCORE'}</small><b id="chaosScore">${state.chaos.score}</b></div></section><div class="chaos-arena" id="chaosArena"><div class="chaos-time"><span id="chaosTime">${remain}</span>s</div></div>`,{world:'arcade',back:{action:'world',world:'arcade',label:'Arcade'}});const tick=setInterval(()=>{const el=document.querySelector('#chaosTime');if(!el){clearInterval(tick);return}if((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)))return;el.textContent=Math.max(0,Math.ceil((state.chaos.end-Date.now())/1000))},250);state.timers.add(tick)}
 function spawnCaosTarget(){if(!state.chaos?.active)return;const arena=document.querySelector('#chaosArena');if(!arena)return;arena.querySelector('.chaos-target')?.remove();const b=document.createElement('button');b.className='chaos-target';b.textContent=random(['URGENTE','¿ESTADO?','PARA HOY','FAVOR VALIDAR','ASAP']);b.style.left=(5+Math.random()*78)+'%';b.style.top=(12+Math.random()*70)+'%';b.onclick=()=>{state.chaos.score++;document.querySelector('#chaosScore').textContent=state.chaos.score;beep('soft');spawnCaosTarget()};arena.appendChild(b);setTimer(()=>{if(b.isConnected)spawnCaosTarget()},1200)}
 async function finishCaos(){if(!state.chaos?.active)return;state.chaos.active=false;const score=state.chaos.score;await awardXP(20+score*2,'arcade',state.lang==='es'?'Caos de 30 segundos':'30 Second Chaos');app.innerHTML=shell(`<section class="result-screen"><div class="result-orb danger-r">⚡</div><small>${state.lang==='es'?'CAOS SUPERADO':'CHAOS SURVIVED'}</small><h1>${score}</h1><p>urgencias neutralizadas en 30 segundos.</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="chaos">Otra vez</button><button class="btn-v3 soft" data-action="world" data-world="arcade">Arcade</button></div></section>`,{world:'arcade'})}
 
@@ -696,7 +698,7 @@ function setupInvadersCanvas(){
   const inv=state.invaders;const fire=()=>{if(!inv.active)return;inv.shots.push({x:inv.shipX*canvas.clientWidth,y:canvas.clientHeight-62});beep('soft')};
   canvas.onpointermove=e=>{const r=canvas.getBoundingClientRect();inv.shipX=clamp((e.clientX-r.left)/r.width,.05,.95)};canvas.onpointerdown=fire
   window.onkeydown=e=>{inv.keys[e.key]=true;if(e.code==='Space'){e.preventDefault();fire()}};window.onkeyup=e=>inv.keys[e.key]=false
-  function frame(t){if(!inv.active)return;if(document.hidden||state.discreet){state.raf=requestAnimationFrame(frame);return;}if(inv.keys.ArrowLeft)inv.shipX=clamp(inv.shipX-.012,.05,.95);if(inv.keys.ArrowRight)inv.shipX=clamp(inv.shipX+.012,.05,.95);if(t-inv.lastSpawn>620){inv.lastSpawn=t;inv.cases.push({x:.08+Math.random()*.84,y:-35,s:28+Math.random()*20,v:.55+Math.random()*.65,label:random(['INC','REQ','URG','REV','MAIL'])})}
+  function frame(t){if(!inv.active)return;if((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus))){state.raf=requestAnimationFrame(frame);return;}if(inv.keys.ArrowLeft)inv.shipX=clamp(inv.shipX-.012,.05,.95);if(inv.keys.ArrowRight)inv.shipX=clamp(inv.shipX+.012,.05,.95);if(t-inv.lastSpawn>620){inv.lastSpawn=t;inv.cases.push({x:.08+Math.random()*.84,y:-35,s:28+Math.random()*20,v:.55+Math.random()*.65,label:random(['INC','REQ','URG','REV','MAIL'])})}
     const W=canvas.clientWidth,H=canvas.clientHeight;ctx.clearRect(0,0,W,H);drawSpace(ctx,W,H,t);inv.shots.forEach(s=>s.y-=8);inv.cases.forEach(c=>c.y+=c.v);
     inv.shots=inv.shots.filter(s=>s.y>-20);let destroyed=[];for(let ci=0;ci<inv.cases.length;ci++){const c=inv.cases[ci];const x=c.x*W;for(let si=0;si<inv.shots.length;si++){const s=inv.shots[si];if(Math.abs(s.x-x)<28&&Math.abs(s.y-c.y)<28){destroyed.push(ci);inv.shots.splice(si,1);inv.score++;if(inv.duo)sendRoom('arcade_hit',{id:crypto.randomUUID()});break}}}
     destroyed=[...new Set(destroyed)].sort((a,b)=>b-a);destroyed.forEach(i=>inv.cases.splice(i,1));
@@ -716,7 +718,7 @@ function starDrift(){state.screen='star-drift';app.innerHTML=shell(`<section cla
 function coffeeBreak(){
   state.screen='coffee'
   const qs=['¿Qué fue lo menos terrible de hoy?','Si pudieras salir ahora mismo, ¿a dónde irías?','¿Qué canción describiría tu energía de este momento?','¿Qué pequeña cosa te gustaría que pasara antes de terminar el día?','¿Café, postre, libro o paseo?']
-  app.innerHTML=shell(`<section class="coffee-premium"><div class="coffee-main"><div class="coffee-cup">☕</div><small>COFFEE BREAK · SOCIAL CHILL</small><h1>${random(qs)}</h1><p>No hay respuesta correcta. Pero sí puedes convertir la pausa digital en una invitación real.</p><div class="coffee-actions">${coffeeActions.map(a=>`<button data-action="coffee-invite" data-coffee="${a.id}"><span>${a.icon}</span><b>${a.label}</b><small>${partnerIsOnline()?'Enviar ahora':'Quedará en el chat'}</small></button>`).join('')}</div><button class="btn-v3 soft" data-action="coffee">Otra pregunta</button></div><aside class="coffee-status glass"><small>DUO ESTADO</small>${avatarVisual(state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||'cow-classic','lg')}<b>${esc(partnerLabel())}</b><p><i class="presence-dot ${partnerIsOnline()?'on':''}"></i>${partnerIsOnline()?'Online en KORAVERSE':'Offline · verá tu invitación al entrar'}</p><button class="btn-v3 soft" data-action="chat-toggle">Abrir chat</button></aside></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})
+  app.innerHTML=shell(`<section class="coffee-premium"><div class="coffee-main"><div class="coffee-cup">☕</div><small>COFFEE BREAK · SOCIAL CHILL</small><h1>${random(qs)}</h1><p>No hay respuesta correcta. Pero sí puedes convertir la pausa digital en una invitación real.</p><div class="coffee-actions">${coffeeActions.map(a=>`<button data-action="coffee-invite" data-coffee="${a.id}"><span>${a.icon}</span><b>${a.label}</b><small>${partnerIsOnline()?'Enviar ahora':'Quedará en el chat'}</small></button>`).join('')}</div><button class="btn-v3 soft" data-action="coffee">Otra pregunta</button></div><aside class="coffee-status glass"><small>DUO ESTADO</small>${avatarVisual(state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||'cow-classic','lg',otherDefault())}<b>${esc(partnerLabel())}</b><p><i class="presence-dot ${partnerIsOnline()?'on':''}"></i>${partnerIsOnline()?'Online en KORAVERSE':'Offline · verá tu invitación al entrar'}</p><button class="btn-v3 soft" data-action="chat-toggle">Abrir chat</button></aside></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})
 }
 async function sendCoffeeInvite(id){const item=coffeeActions.find(x=>x.id===id)||coffeeActions[0];const ok=await sendChatMessage(item.message,'coffee_invite',{action:id});if(!ok)return;toast(item.icon+' '+word('Invitación enviada','Invitation sent'),'signal');beep('signal');if(!QA.active)fetch('/api/kora-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_player:state.profile.player_key,to_player:otherDefault(),from_name:state.profile.display_name,message:item.message,kind:'coffee'})}).catch(()=>{})}
 function rainRoom(){state.screen='rain-room';app.innerHTML=shell(`<section class="rain-room"><div class="rain-window">${Array.from({length:70},(_,i)=>`<i style="--x:${Math.random()*100}%;--d:${Math.random()*2.4}s;--s:${.7+Math.random()*1.4}"></i>`).join('')}<div class="rain-copy glass"><small>SALA DE LLUVIA</small><h1>Nada que resolver.</h1><p>Quédate aquí un minuto. La lluvia no necesita seguimiento.</p><button class="btn-v3 soft" data-action="coffee-invite" data-coffee="five">Invitar a mini break</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
@@ -784,6 +786,7 @@ async function setupSignalChannel(){
 async function sendSignal(){
   if(QA.active)return toast('Señal simulada en QA')
   const to=otherDefault(),from=state.profile.player_key,msg=`${state.profile.display_name} quiere jugar contigo.`
+  await sendChatMessage(msg,'game_invite',{room_code:state.room.code})
   if(state.signalChannel) await state.signalChannel.send({type:'broadcast',event:'signal',payload:{from,to,message:msg,ts:Date.now()}})
   if(state.dbReady) supabase.from('koraverse_signals').insert({from_player:from,to_player:to,message:msg}).then(()=>{})
   // Push real si el backend opcional fue configurado. Si no, falla silenciosamente y Realtime sigue funcionando.
@@ -808,7 +811,7 @@ async function enableNotifications(){
   }catch{toast('Alertas activadas; push cerrado requiere configuración VAPID')}
 }
 function urlBase64ToUint8Array(base64String){const padding='='.repeat((4-base64String.length%4)%4);const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(base64);return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)))}
-async function showBrowserNotification(title,body){if(!('Notification' in window)||Notification.permission!=='granted')return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'KORA_SIGNAL',title,body})}catch{try{new Notification(title,{body})}catch{}}}
+async function showBrowserNotification(title,body){title='KORA-Señal';body='Hay una señal esperándote en KORAVERSE.';if(!('Notification' in window)||Notification.permission!=='granted')return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'KORA_SIGNAL',title,body})}catch{try{new Notification(title,{body})}catch{}}}
 
 // ---------- DUO REALTIME ----------
 function roomPlayer(){return {player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',device:deviceId,role:state.room.role}}
@@ -951,7 +954,7 @@ app.addEventListener('click',async e=>{
   if(a==='sketch-eraser'){state.sketch.eraser=!state.sketch.eraser;el.classList.toggle('active',state.sketch.eraser);return}
   if(a==='sketch-save')return saveSketch()
   if(a==='sketch-send')return sendSketch()
-  if(a==='quick-chat')return sendChatMessage(el.dataset.message||'Hola ✨')
+  if(a==='quick-chat')return sendChatMessage(el.dataset.message||'Hola ✨',el.dataset.game?'game_invite':'text',el.dataset.game?{game:el.dataset.game,room_code:state.room.code}: {})
   if(a==='coffee-invite')return sendCoffeeInvite(el.dataset.coffee)
   if(a==='avatar-studio')return renderAvatarStudio()
   if(a==='select-avatar')return selectAvatar(el.dataset.avatar)
@@ -1015,7 +1018,7 @@ onRoomAction=function(p){
 }
 
 document.addEventListener('input',e=>{if(e.target?.id==='chatInput'){sendTyping(true)}})
-function toggleDiscreet(){state.discreet=!state.discreet;document.documentElement.dataset.paused=String(document.hidden||state.discreet);ambient.pause(document.hidden||state.discreet);updatePresence();let el=document.querySelector('#discreetOverlay');if(state.discreet){if(!el){el=document.createElement('div');el.id='discreetOverlay';el.className='discreet-overlay';document.body.appendChild(el)}el.innerHTML=`<div><span class="brand-orb"></span><small>KORAVERSE FOCUS</small><b>${new Date().toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}</b><p>${state.lang==='es'?'Sesión pausada. Ctrl + Espacio para volver.':'Session paused. Ctrl + Space to return.'}</p></div>`;el.classList.add('show')}else el?.classList.remove('show')}
+function toggleDiscreet(){state.discreet=!state.discreet;document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));updatePresence();let el=document.querySelector('#discreetOverlay');if(state.discreet){if(!el){el=document.createElement('div');el.id='discreetOverlay';el.className='discreet-overlay';document.body.appendChild(el)}el.innerHTML=`<div><span class="brand-orb"></span><small>KORAVERSE FOCUS</small><b>${new Date().toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}</b><p>${state.lang==='es'?'Sesión pausada. Ctrl + Espacio para volver.':'Session paused. Ctrl + Space to return.'}</p></div>`;el.classList.add('show')}else el?.classList.remove('show')}
 document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();return toggleDiscreet()}if(e.key==='Enter'&&e.target?.id==='chatInput'){e.preventDefault();const input=e.target,v=input.value;sendTyping(false);sendChatMessage(v).then(ok=>{if(ok&&input.value===v)input.value=''})}})
 
 const WORLDS = {
@@ -1091,6 +1094,7 @@ async function recordStar(key,label,icon='✦'){
   const stars=localStars();if(stars.some(x=>x.event_key===key))return
   const row={player_key:state.profile.player_key,event_key:key,label,icon,created_at:new Date().toISOString()}
   stars.push(row);state.stars=stars;localStorage.setItem(starStorage(),JSON.stringify(stars))
+  sky.captureLegacy(row)
   if(state.dbReady)await supabase.from('koraverse_constellations').upsert(row,{onConflict:'player_key,event_key'})
 }
 function constellationMarkup(){
@@ -1105,7 +1109,7 @@ function renderSettings(){
 }
 function renderQA(){
   state.screen='qa';clearTimers()
-  app.innerHTML=shell(`<section class="preferences"><small>QA / ADMIN</small><h1>${QA.active?'Laboratorio de prueba':'Acceso al laboratorio'}</h1>${QA.active?`<p>Los cambios de esta sesión no se guardan ni se envían a otras personas.</p><label>XP de prueba <input id="qaXP" type="number" min="0" max="1000000" value="${state.profile.xp}"></label><button class="btn-v3 soft" data-action="qa-xp">Aplicar XP</button><label>Presencia simulada<select id="qaPresence"><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option></select></label><button class="btn-v3 soft" data-action="qa-presence">Aplicar estado</button><div class="hero-buttons"><button class="btn-v3 soft" data-action="qa-chess">Probar ajedrez + Guíame</button><button class="btn-v3 soft" data-action="qa-duo">Probar módulos Duo</button><button class="btn-v3 soft" data-action="avatar-studio">Todos los avatares</button><button class="btn-v3 soft" data-action="qa-reset">Reiniciar prueba</button><button class="btn-v3 primary" data-action="qa-exit">Salir y restaurar</button></div>${planetMap()}`:`<p>Inicia sesión con tu cuenta autorizada de Supabase Auth.</p><label>Email<input id="qaEmail" type="email" autocomplete="username"></label><label>Contraseña<input id="qaPassword" type="password" autocomplete="current-password"></label><button class="btn-v3 primary" data-action="qa-login">Entrar en QA</button><p id="qaStatus" role="status"></p>`}</section>`,{world:'home',back:{action:'settings',label:'Preferencias'}})
+  app.innerHTML=shell(`<section class="preferences"><small>QA / ADMIN</small><h1>${QA.active?'Laboratorio de prueba':'Acceso al laboratorio'}</h1>${QA.active?`<p>Los cambios de esta sesión no se guardan ni se envían a otras personas.</p><label>XP de prueba <input id="qaXP" type="number" min="0" max="1000000" value="${state.profile.xp}"></label><button class="btn-v3 soft" data-action="qa-xp">Aplicar XP</button><label>Presencia simulada<select id="qaPresence"><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option></select></label><button class="btn-v3 soft" data-action="qa-presence">Aplicar estado</button><div class="hero-buttons"><button class="btn-v3 soft" data-action="qa-chess">Probar ajedrez + Guíame</button><button class="btn-v3 soft" data-action="qa-duo">Probar módulos Duo</button><button class="btn-v3 soft" data-action="avatar-studio">Todos los avatares</button><button class="btn-v3 soft" data-action="qa-reset">Reiniciar prueba</button><button class="btn-v3 primary" data-action="qa-exit">Salir y restaurar</button></div>${sky.qaMarkup()}${planetMap()}`:`<p>Inicia sesión con tu cuenta autorizada de Supabase Auth.</p><label>Email<input id="qaEmail" type="email" autocomplete="username"></label><label>Contraseña<input id="qaPassword" type="password" autocomplete="current-password"></label><button class="btn-v3 primary" data-action="qa-login">Entrar en QA</button><p id="qaStatus" role="status"></p>`}</section>`,{world:'home',back:{action:'settings',label:'Preferencias'}})
 }
 async function loginQA(){
   const status=document.querySelector('#qaStatus');if(!supabase){status.textContent='Supabase no está configurado.';return}
@@ -1123,6 +1127,7 @@ async function loginQA(){
 async function exitQA(){
   if(!QA.active)return
   state.profile=QA.original;state.duoStats=QA.duo;state.room=QA.room;state.social={...QA.social,channel:null,presence:{},fallback:[],connected:false};QA.active=false
+  sky.restoreQA()
   await supabase.auth.signOut();await setupSignalChannel();await setupSocialLayer();renderHome()
 }
 function qaDuo(mode='chess'){
@@ -1166,8 +1171,9 @@ document.addEventListener('input',e=>{
 document.addEventListener('pointerdown',()=>{lastInteraction=Date.now();ambient.activate().catch(()=>{})},{passive:true})
 document.addEventListener('keydown',()=>{lastInteraction=Date.now()})
 let pauseStarted=null
-document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String(document.hidden||state.discreet);ambient.pause(document.hidden||state.discreet);if(document.hidden){pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true)}updatePresence()})
+document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));if(document.hidden){pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true)}updatePresence()})
 window.addEventListener('online',()=>{if(state.profile&&!QA.active)setupSocialLayer()})
 window.addEventListener('pagehide',()=>state.social.channel?.untrack())
 
-init()
+const sky=createLivingSky({app,state,QA,supabase,shell,ambient,avatarVisual,renderHome,renderBaseHome:renderUniverseHome,travel:travelTo,toast,localStars,partnerPresence,clearTimers,url:SUPABASE_URL,key:SUPABASE_KEY,coffee:()=>coffeeBreak(),joinRoom:code=>connectRoom('guest',code)})
+sky.start(init)
