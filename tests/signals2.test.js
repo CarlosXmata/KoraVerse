@@ -42,10 +42,10 @@ test('quote renderer displays the real body, invite renderer uses a validated CT
 test('photo metadata stores bounded dimensions and private paths, never a base64 image or signed URL',async()=>{
  const path='carlos/2026/10/11111111-1111-4111-8111-111111111111.webp',meta=photoMetadata({path,thumbnail_path:path.replace('.webp','-thumb.webp'),width:1600,height:1200,mime:'image/webp',original_name:'photo.jpg'})
  assert.equal(validMediaPath(path),true);assert.equal(meta.bucket,'koraverse-chat-media');assert.equal(meta.url,undefined);assert.equal(meta.data_url,undefined);assert.throws(()=>photoMetadata({...meta,width:9000}));assert.equal(validMediaPath('../photo.webp'),false)
- const html=renderMessage({id:1,kind:'photo',body:'Un recuerdo',metadata:meta});assert.match(html,/data-photo-path=/);assert.match(html,/Un recuerdo/);assert.match(html,/Fotograf.+a privada/)
+ const html=renderMessage({id:1,kind:'photo',body:'Un recuerdo',metadata:meta});assert.match(html,/data-photo-path=/);assert.match(html,/Un recuerdo/);assert.match(html,/Cargando fotograf/)
  assert.deepEqual(photoDimensions(6000,4000),{width:1800,height:1200});assert.deepEqual(photoDimensions(400,600),{width:400,height:600})
  await assert.rejects(preparePhoto({size:21*1024*1024,type:'image/jpeg',name:'a.jpg'}),/20 MB/)
- const media=new ChatMedia({qa:()=>true});assert.throws(()=>media.getClient(),/QA/);await assert.rejects(media.upload({}),/QA/)
+ const media=new ChatMedia({qa:()=>true});await assert.rejects(media.upload({}),/QA/)
 })
 test('room links reject malformed codes and unsupported games instead of navigating to external URLs',()=>{
  assert.equal(roomLink('ABC123','chess'), '/?room=ABC123&game=chess');assert.equal(roomLink('https://evil','chess'),null)

@@ -2,11 +2,15 @@
 
 Fecha: 8 de octubre de 2026. Proyecto: KORAVERSE 5.1 actual ampliado, JavaScript vanilla/Vite/Supabase. No se reemplazó el repositorio anterior ni sus migraciones.
 
+## Revisión actual: fotos sin login
+
+Se eliminó la sesión Auth de fotos. Las tres APIs del servidor se prueban con el cliente ChatMedia en Carlos → Kora y Kora → Carlos, incluyendo carga automática tras recarga. Se comprueban bucket privado, perfiles/rutas/origen, límites, firma de 300 segundos y limpieza protegida. FOTOS_SIN_LOGIN.md detalla el cambio. Las capturas visuales siguientes pertenecen a la revisión anterior y se conservan como evidencia histórica; no representan una nueva comprobación contra Supabase remoto.
+
 ## Resultado local
 
-**npm test: 53 pruebas, 53 aprobadas, 0 fallos. npm run build: aprobado.** Logs íntegros en `validation/social2/npm-test.log` y `npm-build.log`.
+**npm test: 58 pruebas, 58 aprobadas, 0 fallos. npm run build: aprobado.** Logs íntegros en `validation/social2/npm-test.log` y `npm-build.log`.
 
-Build: Vite 7.3.6, 77 módulos; JS principal 495.50 kB (153.82 kB gzip), CSS 126.21 kB (28.16 kB gzip). Node de validación: 24.19.0. Se usó npm mediante el runtime disponible; los comandos ejecutados son los definidos en package.json. No se incluyen node_modules, dist ni secretos en el ZIP.
+Build: Vite 7.3.6, 77 módulos; JS principal 494.36 kB (153.42 kB gzip), CSS 125.98 kB (28.11 kB gzip). Node de validación: 24.19.0. Se usó npm mediante el runtime disponible; los comandos ejecutados son los definidos en package.json. No se incluyen node_modules, dist ni secretos en el ZIP.
 
 ## Cobertura comprobada
 

@@ -21,7 +21,7 @@ Esta expansión continúa el proyecto existente. Conserva Birthday 10/10, Alignm
 3. Mantener las variables y tablas existentes. Para una instalación nueva, seguir las migraciones anteriores en orden (`schema.sql`, `migration_v5.sql`, `migration_v5_1.sql` según README previo).
 4. Ejecutar **supabase/migration_social_v5_1.sql después de migration_v5_1.sql** en Supabase SQL Editor. Es aditiva e idempotente; no elimina mensajes ni modifica sus cuerpos.
 5. Mantener `koraverse_messages` en la publicación Realtime existente. Presence, Broadcast `typing`/`chat_message` y Postgres Changes siguen usándose; no hay un backend nuevo.
-6. Configurar fotos y notificaciones como se explica abajo. Para el PIN, seguir SANCTUARY_PIN_4_SETUP.md antes de activar el modo.
+6. Configurar las APIs de fotos como se explica en FOTOS_SIN_LOGIN.md; no se necesitan cuentas de fotos. Configurar notificaciones como se explica abajo. Para el PIN, seguir SANCTUARY_PIN_4_SETUP.md antes de activar el modo.
 
 No se aplicó esta migración a un servicio remoto ni se desplegó esta entrega: no hay credenciales ni un proyecto remoto conectado en esta ejecución.
 
@@ -44,26 +44,11 @@ SANCTUARY_OWNER_USER_ID, SANCTUARY_ORIGIN, SANCTUARY_PIN_SALT, SANCTUARY_PIN_HAS
 
 Se crea **koraverse-chat-media**, privado, límite 4 MiB por objeto y MIME WebP/JPEG. No se cambia `koraverse-sketches` ni se mueven sus dibujos históricos.
 
-Crear/verificar una cuenta Supabase Auth para Carlos y otra para Kora. Obtener sus UUID reales en Authentication > Users y registrar los dos miembros desde SQL Editor:
+Las fotografías se suben y firman mediante APIs server-side de Vercel sin Auth independiente. Carlos/Kora usan su perfil habitual. No hay diálogo email/contraseña ni cierre de sesión de fotos. Las operaciones utilizan SUPABASE_SERVICE_ROLE_KEY solo en servidor, validan perfiles/rutas, rechazan un bucket público y mantienen URLs firmadas de cinco minutos.
 
-```sql
--- Sustituir cada UUID por el identificador REAL de esa cuenta.
-insert into public.koraverse_media_members(user_id,player_key)
-values ('UUID_REAL_CARLOS','carlos'),('UUID_REAL_KORA','kora')
-on conflict(user_id) do update set player_key=excluded.player_key;
-```
+Ver **FOTOS_SIN_LOGIN.md** para endpoints, configuración, límites, limpieza y comprobación de ambos sentidos/recarga. El bucket sigue privado; las APIs adoptan el modelo abierto Carlos/Kora y no autentican la identidad de quien elige un perfil. Las políticas históricas quedan instaladas, pero no se necesitan miembros ni cuentas Auth para usar el flujo nuevo.
 
-Cada cuenta solo consulta su afiliación. Ambos miembros pueden leer las imágenes del bucket; cada uno sube bajo su propia ruta y elimina sus propios objetos. No hay lectura anónima, actualización/upsert ni bucket público. Las políticas anteriores de otros buckets permanecen; revisar que no exista una política personalizada global `using(true)` sobre `storage.objects`, pues las políticas permisivas de PostgreSQL se suman.
-
-Ruta completa: `<player_key>/<yyyy>/<mm>/<uuid>.webp`; miniatura: `<uuid>-thumb.webp`. Se almacena path, thumbnail_path, bucket, dimensiones, MIME y nombre original en metadata. Nunca Base64 ni URL firmada en los nuevos mensajes de foto. Las URL se firman durante 15 minutos y se renuevan al renderizar cuando la caché cumple 14 minutos.
-
-Elegir Carlos/Kora en el chat abierto no demuestra identidad. **Ver/subir fotos exige entrar una vez con la cuenta autorizada de ese perfil**, usando una sesión separada de QA/Santuario. El texto sigue funcionando como antes. Texto, caption, nombre de archivo y metadata siguen sujetos al modelo relativamente abierto del chat existente; este cambio protege el archivo de imagen, no convierte todo el chat en privado. Una URL ya firmada sigue siendo utilizable por quien la tenga hasta expirar.
-
-### Probar fotos
-
-En dos navegadores, elegir perfiles distintos y autorizar cada cuenta para fotos. Adjuntar JPEG/PNG/WebP, comprobar preview y enviar con caption. Verificar recepción, miniatura, apertura, zoom, cierre, historial multimedia y nueva carga al refrescar. Probar PNG grande, error de subida, cancelación y HEIC: solo se admite si el navegador lo decodifica; de lo contrario aparece una explicación. Límite de entrada 20 MiB; se redimensiona y vuelve a codificar mediante canvas, eliminando metadata ajena a los píxeles. Si el selector móvil ofrece cámara se puede usar; no se solicita cámara automáticamente.
-
-Sin sesión autorizada, la imagen se sustituye por «Fotografía privada · entra para verla». La sesión se puede cerrar desde Preferencias. El enlace para guardar usa el comportamiento normal del navegador; algunos navegadores abren una URL de otro origen para guardarla.
+La ruta, metadata, preparación, galería y visor siguen iguales. Cada archivo se sube por separado y no se guarda Base64 ni URL firmada en mensajes. Texto, caption y metadata conservan el modelo anterior del chat.
 
 ## Probar invitaciones y trivia
 

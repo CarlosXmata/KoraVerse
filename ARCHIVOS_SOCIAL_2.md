@@ -19,8 +19,13 @@ Comparación con el KORAVERSE 5.1 anterior: 98 archivos originales, ninguno elim
 
 ## Añadidos
 
+- api/chat-media-delete.js
+- api/chat-media-sign.js
+- api/chat-media-upload.js
 - api/chat-push.js
 - api/sanctuary-mode.js
+- FOTOS_SIN_LOGIN.md
+- lib/chat-media-server.js
 - README_SOCIAL_2.md
 - SANCTUARY_PIN_4_SETUP.md
 - scripts/migrate-sanctuary-vault.mjs
@@ -36,12 +41,14 @@ Comparación con el KORAVERSE 5.1 anterior: 98 archivos originales, ninguno elim
 - src/trivia-bank.js
 - src/trivia-session.js
 - supabase/migration_social_v5_1.sql
+- tests/media-server.test.js
 - tests/signals2.test.js
 - tests/social-migration.test.js
 - VALIDACION_SOCIAL_2.md
 - validation/social2/browser-checks.json
 - validation/social2/chat-320.jpg
 - validation/social2/desktop-photo.jpg
+- validation/social2/media-bundle-check.json
 - validation/social2/mobile-lightbox-360.jpg
 - validation/social2/mobile-photo-360.jpg
 - validation/social2/npm-build.log

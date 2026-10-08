@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "serverSecretCanaryAbsent": true,
+  "serviceRoleVariableAbsent": true,
+  "photoLoginAbsent": true,
+  "checkedBuildAssets": true
+}
