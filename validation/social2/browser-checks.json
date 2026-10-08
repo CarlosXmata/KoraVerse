@@ -1,0 +1,41 @@
+{
+  "solo": {
+    "questions": 20,
+    "unique": 20,
+    "result": "5/20, 25%, 25 XP, best streak 2",
+    "source": "actual app offline"
+  },
+  "mobile": [
+    {
+      "width": 320,
+      "height": 568,
+      "pageWidth": 320,
+      "panel": {
+        "left": 8,
+        "right": 312,
+        "top": 8,
+        "bottom": 560
+      },
+      "inputBottom": 548.8
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "pageWidth": 360,
+      "panel": {
+        "left": 8,
+        "right": 352,
+        "top": 8,
+        "bottom": 792
+      },
+      "inputBottom": 780.8
+    }
+  ],
+  "pin": {
+    "source": "isolated fixture",
+    "wrong": "generic error",
+    "fourthDigit": "automatic submit",
+    "correct": "opened simulated screen"
+  },
+  "liveSupabase": false
+}

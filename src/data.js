@@ -1,38 +1,4 @@
-export const triviaBank = {
-  got: [
-    { q: '¿Cuál es el lema de la Casa Stark?', a: ['Fire and Blood','Winter is Coming','Hear Me Roar!','Ours is the Fury'], c: 1 },
-    { q: '¿Cómo se llama la espada de acero valyrio de Jon Snow?', a: ['Ice','Longclaw','Needle','Heartsbane'], c: 1 },
-    { q: '¿Quién es conocida como la Madre de Dragones?', a: ['Cersei Lannister','Arya Stark','Daenerys Targaryen','Margaery Tyrell'], c: 2 },
-    { q: '¿Qué personaje es conocido como The Hound?', a: ['Sandor Clegane','Gregor Clegane','Bronn','Jorah Mormont'], c: 0 },
-    { q: '¿Qué ciudad libre está ligada a la Casa de Blanco y Negro?', a: ['Volantis','Braavos','Pentos','Meereen'], c: 1 },
-    { q: '¿Quién empuña Needle?', a: ['Sansa Stark','Arya Stark','Brienne of Tarth','Ygritte'], c: 1 },
-  ],
-  marvel: [
-    { q: '¿Cómo se llama el martillo de Thor?', a: ['Stormbreaker','Mjolnir','Gungnir','Jarnbjorn'], c: 1 },
-    { q: '¿Qué identidad usa Steve Rogers?', a: ['Iron Man','Captain America','Hawkeye','Falcon'], c: 1 },
-    { q: '¿Qué gema estaba originalmente en el cetro de Loki?', a: ['Power Stone','Mind Stone','Time Stone','Reality Stone'], c: 1 },
-    { q: '¿Cómo se llama el país ficticio gobernado por Black Panther?', a: ['Sokovia','Wakanda','Latveria','Genosha'], c: 1 },
-    { q: '¿Cuál es el nombre real de Black Widow?', a: ['Wanda Maximoff','Natasha Romanoff','Carol Danvers','Yelena Belova'], c: 1 },
-    { q: '¿Qué Vengador usa principalmente arco y flecha?', a: ['Falcon','Hawkeye','Ant-Man','War Machine'], c: 1 },
-  ],
-  series: [
-    { q: 'En Breaking Bad, ¿qué alias usa Walter White?', a: ['Heisenberg','Saul','Gus','Tuco'], c: 0 },
-    { q: 'En Friends, ¿cómo se llama la hermana de Ross?', a: ['Phoebe','Monica','Rachel','Janice'], c: 1 },
-    { q: 'En Stranger Things, ¿cómo se llama la niña con poderes?', a: ['Max','Nancy','Eleven','Robin'], c: 2 },
-    { q: 'En The Office (US), ¿quién es el gerente regional al inicio?', a: ['Jim Halpert','Michael Scott','Dwight Schrute','Andy Bernard'], c: 1 },
-    { q: 'En Peaky Blinders, ¿cuál es el apellido de Tommy?', a: ['Shelby','Solomons','Changretta','Gray'], c: 0 },
-    { q: 'En The Last of Us, ¿cómo se llama la joven que viaja con Joel?', a: ['Tess','Ellie','Marlene','Riley'], c: 1 },
-  ],
-  movies: [
-    { q: '¿En qué película aparece la frase «Why so serious?»?', a: ['The Dark Knight','Joker','Batman Begins','Fight Club'], c: 0 },
-    { q: '¿Cómo se llama el hotel de The Shining?', a: ['Overlook Hotel','Bates Motel','Grand Budapest','Continental'], c: 0 },
-    { q: '¿Qué color de píldora toma Neo en The Matrix?', a: ['Azul','Roja','Verde','Blanca'], c: 1 },
-    { q: '¿Quién dirige Pulp Fiction?', a: ['Martin Scorsese','Quentin Tarantino','David Fincher','Christopher Nolan'], c: 1 },
-    { q: '¿Qué película tiene a Maximus Decimus Meridius?', a: ['Troya','Gladiator','300','Braveheart'], c: 1 },
-    { q: '¿Cómo se llama el vaquero de Toy Story?', a: ['Buzz','Woody','Andy','Jessie'], c: 1 },
-  ]
-}
-
+export {triviaBank} from './trivia-bank.js'
 export const sameBrain = [
   { q:'Después del trabajo hoy, ¿qué elegirías?', o:['Café','Comer algo','Paseo','Ir directo a casa'] },
   { q:'Si pudieras desaparecer 30 minutos, ¿dónde?', o:['Playa','Librería','Montaña','Cama'] },

@@ -1,0 +1,8 @@
+import {triviaBank} from './trivia-bank.js'
+export function triviaQueue(category='mix',rng=Math.random){const source=category==='mix'?Object.values(triviaBank).flat():triviaBank[category]||[];const all=[...new Map(source.map(q=>[q.q,q])).values()];for(let i=all.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[all[i],all[j]]=[all[j],all[i]]}return all.slice(0,20)}
+export function advanceDuoTrivia(game,category='mix',players=[]){
+ if(game.mode==='trivia'&&game.triviaSession&&!game.triviaSession.complete){if(!game.result)return false;game.triviaSession.index++;if(game.triviaSession.index>=game.triviaSession.queue.length){game.triviaSession.complete=true;return true}}
+ else game.triviaSession={category,queue:triviaQueue(category),index:0,scores:Object.fromEntries(players.map(p=>[p,0])),complete:false}
+ const session=game.triviaSession;game.screen='game';game.mode='trivia';game.round++;game.trivia={cat:session.category,q:session.queue[session.index]};game.answers={};game.result=null;return true
+}
+export function settleDuoTrivia(game,player,index,players){if(game.mode!=='trivia'||game.result||game.triviaSession?.complete||!players.includes(player)||!Number.isInteger(index)||index<0||index>3||game.answers[player]!=null)return null;game.answers[player]=index;if(players.length!==2||!players.every(p=>game.answers[p]!=null))return {pending:true};const correct=players.filter(p=>game.answers[p]===game.trivia.q.c);for(const p of correct)if(game.triviaSession)game.triviaSession.scores[p]=(game.triviaSession.scores[p]||0)+1;game.result={both:correct.length===2,text:players.map(p=>`${p}: ${correct.includes(p)?'correcta ✓':'incorrecta'}`).join(' · ')};return {pending:false,correct}}

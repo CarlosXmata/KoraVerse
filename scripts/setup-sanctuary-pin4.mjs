@@ -1,0 +1,6 @@
+import {randomBytes} from 'node:crypto'
+import {hashPin} from '../lib/sanctuary-security.js'
+if(!process.stdin.isTTY){console.error('Use an interactive terminal. Never put the PIN in arguments.');process.exit(1)}
+console.log('Introduce un PIN de cuatro dígitos. La entrada está oculta. Enter confirma; Ctrl+C cancela.')
+process.stdin.setRawMode(true);process.stdin.resume();let pin=''
+process.stdin.on('data',buffer=>{for(const c of buffer.toString()){if(c==='\u0003')process.exit(1);if(c==='\r'||c==='\n'){if(!/^\d{4}$/.test(pin)){console.error('Se necesitan exactamente cuatro dígitos.');pin='';continue}const salt=randomBytes(32).toString('hex');console.log(`\nSANCTUARY_PIN_MODE=four-digit\nSANCTUARY_PIN_SALT=${salt}\nSANCTUARY_PIN_HASH=${hashPin(pin,salt)}`);if(!process.env.SANCTUARY_SESSION_SECRET)console.log('SANCTUARY_SESSION_SECRET='+randomBytes(32).toString('base64'));if(!process.env.SANCTUARY_VAULT_KEY)console.log('SANCTUARY_VAULT_KEY='+randomBytes(32).toString('base64'));console.log('Guarda estas variables SOLO en el servidor. Conserva la clave de bóveda existente al cambiar el PIN. No actives el modo hasta migrar las páginas anteriores.');pin='';process.stdin.setRawMode(false);process.exit(0)}if(c==='\u007f'||c==='\b')pin=pin.slice(0,-1);else if(/^\d$/.test(c)&&pin.length<4)pin+=c}})

@@ -3,6 +3,7 @@ import {verifySession,readCookie,cookieHeader,sameOrigin,privateResponse,validEn
 import {validOverride} from '../src/universe-engine.js'
 export function createSanctuaryHandler({env=process.env,db=serverDB(env),now=()=>Date.now()}={}){return async(req,res)=>{
  privateResponse(res)
+ if(env.SANCTUARY_MAINTENANCE==='true')return apiFailure(res)
  if(!['GET','POST','DELETE'].includes(req.method))return res.status(405).json({error:'Method not allowed'})
  if(req.method!=='GET'&&!sameOrigin(req,env))return apiFailure(res,403)
  if(req.headers['sec-fetch-site']&&req.headers['sec-fetch-site']!=='same-origin')return apiFailure(res,403)

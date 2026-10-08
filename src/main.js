@@ -6,6 +6,12 @@ import './living-sky.css'
 import { createLivingSky } from './living-sky.js'
 import { Ambient } from './ambient.js'
 import { mergeMessages, latestPresence } from './social-utils.js'
+import './signals.css'
+import {renderMessage} from './signals-renderers.js'
+import {TypingPulse,typingMarkup,shouldSound,SIGNAL_SOUND_KEY,notificationData,resonanceText,roomCode,roomLink,parseDuoLink,GAMES,triviaRank} from './signals-utils.js'
+import {SignalAudio} from './signals-audio.js'
+import {ChatMedia,preparePhoto,openPhotoLightbox} from './chat-media.js'
+import {triviaQueue,advanceDuoTrivia,settleDuoTrivia} from './trivia-session.js'
 import {
   triviaBank, sameBrain, missions, gardenQuotes, englishCurriculum,
   bundledEnglishExercises, sudokuPuzzles, memoryIcons, achievements,
@@ -23,6 +29,7 @@ const supabase = configured ? createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const sessionId = crypto.randomUUID()
 const ambient = new Ambient()
+const signalAudio=new SignalAudio()
 let socialHeartbeat = null, lastInteraction = Date.now(), traveling = false
 const QA = { active:false, original:null, duo:null, room:null, social:null }
 const PROFILE_KEY = 'koraverse_v3_profile'
@@ -57,6 +64,7 @@ const state = {
   chaos: null,
   invaders: null,
   sound: localStorage.getItem(SOUND_KEY) !== 'off',
+  notificationSound:localStorage.getItem(SIGNAL_SOUND_KEY)!=='off',
   lang: localStorage.getItem(LANG_KEY) || 'es',
   theme: localStorage.getItem(THEME_KEY) || 'nebula',
   pendingSignal: null,
@@ -74,7 +82,7 @@ const state = {
 function freshDuoGame() {
   return {
     screen: 'lobby', mode: null, round: 0,
-    trivia: null, answers: {}, result: null,
+    trivia: null, triviaSession:null, answers: {}, result: null,
     brain: null, brainAnswers: {}, brainResult: null,
     mission: null,
     sudokuId: null, sudokuBoard: null, sudokuFixed: null, sudokuStatus: null,
@@ -95,6 +103,34 @@ const levelFloor = level => 120 * (level-1) * (level-1)
 const levelCeil = level => 120 * level * level
 const profileKey = name => name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'player'
 const otherDefault = () => state.profile?.player_key === 'carlos' ? 'kora' : 'carlos'
+
+const typingPulse=new TypingPulse(active=>sendTyping(active))
+const chatMedia=new ChatMedia({url:SUPABASE_URL,key:SUPABASE_KEY,player:()=>state.profile?.player_key,qa:()=>QA.active})
+let inviteBusy=false,photoDraft=null,photoBusy=false,photoPreviewUrl=null,resonanceTimer=null
+const inviteStatuses=new Map()
+function typingContent(){const av=state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||'cow-classic';return typingMarkup(partnerLabel(),avatarVisual(av,'xs'),state.lang)}
+function signalResonance(msg){if(QA.active||state.discreet||document.hidden||['minute','library','rain-room'].includes(state.screen))return;document.querySelector('.signal-resonance')?.remove();clearTimeout(resonanceTimer);const el=document.createElement('div');el.className='signal-resonance';el.setAttribute('role','status');el.innerHTML='<img src="/avatars/cow-classic.svg" alt=""><span>'+esc(resonanceText(msg.kind,state.lang))+'</span>';document.body.appendChild(el);const fab=document.querySelector('.social-fab');fab?.classList.add('signal-pulse');resonanceTimer=setTimeout(()=>{el.remove();fab?.classList.remove('signal-pulse')},4500)}
+function photoDraftMarkup(){return photoDraft?'<div class="photo-draft"><img src="'+esc(photoPreviewUrl)+'" alt="Vista previa de fotografía"><span>'+word('Una foto lista para cruzar el cielo','A photo ready to cross the sky')+'</span><button data-action="photo-cancel" aria-label="Retirar fotografía">×</button></div>':''}
+function clearPhotoDraft(){if(photoPreviewUrl)URL.revokeObjectURL(photoPreviewUrl);photoPreviewUrl=null;photoDraft=null;document.querySelector('#photoDraft')?.replaceChildren()}
+async function selectChatPhoto(file){if(QA.active)return toast('QA solo usa una fotografía simulada.');if(!state.profile)return;try{const prepared=await preparePhoto(file);clearPhotoDraft();photoDraft=prepared;photoPreviewUrl=URL.createObjectURL(prepared.blob);document.querySelector('#photoDraft').innerHTML=photoDraftMarkup()}catch(e){toast(e.message)}}
+async function sendComposer(){if(photoBusy)return false;const input=document.querySelector('#chatInput'),value=input?.value||'';typingPulse.stop();if(!photoDraft){const ok=await sendChatMessage(value);if(ok&&input?.value===value)input.value='';return ok}photoBusy=true;const prepared=photoDraft;let metadata;const status=document.querySelector('#photoStatus');if(status)status.textContent=word('La foto está cruzando tu órbita…','The photo is crossing your orbit…');try{metadata=await chatMedia.upload(prepared);if(!metadata)return false;const ok=await sendChatMessage(value,'photo',metadata);if(!ok){await chatMedia.cleanup(metadata);return false}if(photoDraft===prepared)clearPhotoDraft();if(input?.value===value)input.value='';return true}catch(e){toast(e.message);return false}finally{photoBusy=false;if(status)status.textContent=''}}
+async function quickGameInvite(game='trivia'){if(inviteBusy)return false;inviteBusy=true;try{return await createGameInvite(game)}finally{inviteBusy=false}}
+async function createGameInvite(game='trivia'){
+ if(!GAMES[game])return false
+ if(QA.active){const row={id:'qa-invite-'+crypto.randomUUID(),client_id:crypto.randomUUID(),from_player:state.profile.player_key,to_player:otherDefault(),kind:'game_invite',body:word('Compartamos una órbita.','Let’s share an orbit.'),metadata:{room_code:'QA1234',game,inviter:state.profile.display_name},created_at:new Date().toISOString()};receiveChatMessage(row);return true}
+ if(!state.dbReady||!supabase){toast('Necesitamos conexión para crear una sala real.');return false}
+ if(state.room.role!=='host'||!state.room.connected||state.room.game.screen!=='lobby'){const code=randomCode();if(!await connectRoom('host',code))return false}
+ state.room.game.invitedGame=game;await broadcastGame()
+ const code=state.room.code,metadata={room_code:code,game,inviter:state.profile.display_name,deep_link:roomLink(code,game,location.pathname),created_at:new Date().toISOString()}
+ const ok=await sendChatMessage(state.profile.display_name+word(' te invita a: ',' invites you to: ')+GAMES[game][state.lang], 'game_invite',metadata)
+ if(ok){state.social.open=true;state.social.unread=0;renderDuoScreen();refreshSocialDock();if(activeDuoPlayers().length===2&&state.room.game.screen==='lobby'){state.room.game.invitedGame=null;applyDuoAction(game,{})}}
+ return ok
+}
+async function closedInvite(id,game){if(id)inviteStatuses.set(id,'closed');refreshSocialDock();app.innerHTML=shell('<section class="result-screen"><small>DUO REALM</small><h1>'+word('Esa órbita ya se cerró.','That orbit has closed.')+'</h1><p>'+word('El anfitrión puede crear otra cuando esté aquí.','The host can create another when they are here.')+'</p><button class="btn-v3 primary" data-action="new-invite" data-game="'+esc(game||'trivia')+'">'+word('Crear una nueva','Create a new one')+'</button></section>',{world:'duo',back:{action:'home',label:word('Entre mundos','Between worlds')}})}
+async function enterInvitation(code,game,id){code=roomCode(code);if(!code)return closedInvite(id,game);state.social.open=false;typingPulse.stop();if(QA.active){inviteStatuses.set(id,'joined');return qaDuo(game||'trivia')}if(state.room.code===code&&state.room.role==='host'){renderDuoScreen();return}const ok=await connectRoom('guest',code);if(!ok)return false;for(let i=0;i<8&&!state.room.receivedState&&state.room.code===code;i++){await new Promise(resolve=>setTimeout(resolve,1000));await sendRoom('need_state',{})}if(!state.room.receivedState||state.room.code!==code){await leaveRoom(false);return closedInvite(id,game)}if(id)inviteStatuses.set(id,'joined');if(GAMES[game]&&state.room.game.screen==='lobby')requestDuoAction(game,{});refreshSocialDock();return true}
+function socialQAMarkup(){return '<h2>Signals 2.0</h2><div class="social-qa-actions">'+['text','typing','photo','quote','chess','sudoku','trivia','sound','expired','20-trivia'].map(id=>'<button class="btn-v3 soft" data-action="qa-social" data-preview="'+id+'">'+esc(id)+'</button>').join('')+'</div>'}
+function socialPreview(id){if(!QA.active)return;if(id==='20-trivia')return startSoloTrivia('mix');if(id==='expired')return closedInvite('qa-expired','trivia');if(id==='sound')return toast(word('Los sonidos no se reproducen en QA.','Sounds do not play in QA.'));if(id==='typing'){state.social.typing=otherDefault();state.social.open=true;renderQA();refreshSocialDock();clearTimeout(state.social.typingTimer);state.social.typingTimer=setTimeout(()=>{state.social.typing=null;refreshSocialDock()},4000);return}const kind=GAMES[id]?'game_invite':id,body=kind==='quote'?'No todo minuto libre tiene que convertirse en productividad.':kind==='photo'?'Una imagen de prueba, sin subir nada.':kind==='game_invite'?'Una partida simulada.':'Una señal de prueba llegó.';receiveChatMessage({id:'qa-'+crypto.randomUUID(),from_player:otherDefault(),to_player:state.profile.player_key,kind,body,metadata:kind==='game_invite'?{room_code:'QA1234',game:id}:kind==='quote'?{source:'quiet-library'}:kind==='photo'?{path:'carlos/2026/10/11111111-1111-4111-8111-111111111111.webp',thumbnail_path:'carlos/2026/10/11111111-1111-4111-8111-111111111111-thumb.webp',width:800,height:600}: {},created_at:new Date().toISOString()});state.social.open=true;renderQA();refreshSocialDock();if(kind==='photo'){const img=document.querySelector('[data-photo-path]');if(img){img.src='/avatars/cow-galaxy.svg';img.parentElement.querySelector('.photo-access-note').hidden=true}}}
+
 
 
 const UI = {
@@ -141,7 +177,7 @@ function setTimer(fn, ms) { const timer={remaining:ms,last:Date.now(),id:null};c
 function clearTimers(){window.onkeydown=null;window.onkeyup=null;if(state.invaders)state.invaders.active=false; for(const id of state.timers){clearTimeout(id?.id||id);clearInterval(id?.id||id)}; state.timers.clear(); if(state.raf) cancelAnimationFrame(state.raf); state.raf=null }
 
 function beep(type='soft') {
-  if(!state.sound) return
+  if(!state.sound||QA.active||state.discreet) return
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
     const osc = ctx.createOscillator(); const gain = ctx.createGain()
@@ -191,19 +227,9 @@ function profileMini(){
 }
 
 function renderChatMessages(){
-  const me=state.profile?.player_key
-  const cutoff=QA.active?0:chatLimpiarCutoff()
-  const list=(state.social.messages||[]).filter(m=>new Date(m.created_at||0).getTime()>cutoff).slice(-80)
-  if(!list.length) return `<div class="chat-empty"><span>✦</span><b>${state.lang==='es'?'Dimensión tranquila.':'Silencio dimension.'}</b><p>${state.lang==='es'?'Escribe algo, manda una señal o crea un dibujo.':'Write something, send a signal or make a drawing.'}</p></div>`
-  return list.map(m=>{
-    const mine=m.from_player===me
-    const special=m.kind&&m.kind!=='text'
-    const sketch=m.kind==='sketch'&&(m.metadata?.url||m.metadata?.data_url)
-    return `<div class="chat-message ${mine?'mine':'theirs'} ${special?'special':''}">
-      <div class="chat-bubble">${special&&m.kind!=='sketch'?`<small>${m.kind==='coffee_invite'?'COFFEE SIGNAL':'KORA SIGNAL'}</small>`:''}
-      ${sketch?`<div class="chat-sketch"><img src="${esc(sketch)}" alt="Dibujo compartido"><span>🎨 ${esc(m.body||'Mira lo que dibujé')}</span></div>`:`<p>${esc(m.body)}</p>`}${!mine&&m.kind==='coffee_invite'?`<button class="coffee-accept" data-action="coffee-accept" data-id="${esc(m.client_id||m.id)}">${word('Sí, vamos ☕','Yes, let’s go ☕')}</button>`:''}<time>${formatClock(m.created_at||Date.now())}</time></div>
-    </div>`
-  }).join('')
+ const me=state.profile?.player_key,cutoff=QA.active?0:chatLimpiarCutoff(),list=(state.social.messages||[]).filter(m=>new Date(m.created_at||0).getTime()>cutoff).slice(-100)
+ if(!list.length)return '<div class="chat-empty"><span>✦</span><b>'+word('Dimensión tranquila.','A quiet dimension.')+'</b><p>'+word('Una frase, una imagen, una partida. Tu órbita está abierta.','A quote, a photo, a game. Your orbit is open.')+'</p></div>'
+ return list.map(m=>renderMessage(m,{me,lang:state.lang,status:inviteStatuses.get(m.client_id||m.id),clock:formatClock})).join('')
 }
 function socialDockMarkup(){
   if(!state.profile)return ''
@@ -214,26 +240,26 @@ function socialDockMarkup(){
   <aside id="socialPanel" ${state.social.open?'':'inert'} class="social-panel ${state.social.open?'open':''}">
     <div class="social-head">
       <div class="social-person">${avatarVisual(av,'sm')}<div><b>${esc(label)}</b><small id="socialPresenceText"><i class="presence-dot ${online?'on':''}"></i>${online?`${tr('online')}${pp?.screen?` · ${esc(pp.screen)}`:''}`:tr('offline')}</small></div></div>
-      <div class="chat-head-actions"><button data-action="sketch-pad" title="${tr('sketch')}">🎨</button><button data-action="chat-clear" title="${tr('clearChat')}">🧹</button><button data-action="chat-toggle">×</button></div>
+      <div class="chat-head-actions"><button data-action="media-gallery" title="${word('Historial multimedia','Media history')}">▧</button><button data-action="sketch-pad" title="${tr('sketch')}">🎨</button><button data-action="chat-clear" title="${tr('clearChat')}">🧹</button><button data-action="chat-toggle">×</button></div>
     </div>
     <p class="chat-connection" id="chatConnection">${socialConnectionLabel()}</p><div class="social-quick">
       <button data-action="send-signal">✨ ¿Jugamos?</button>
       <button data-action="coffee-invite" data-coffee="coffee">☕ Café</button>
       <button data-action="quick-chat" data-game="chess" data-message="¿Ajedrez? ♟️">♟️ Ajedrez</button>
-      <button data-action="quick-chat" data-game="sudoku" data-message="¿Sudoku? 🧩">🧩 Sudoku</button>
+      <button data-action="quick-chat" data-game="sudoku" data-message="¿Sudoku? 🧩">🧩 Sudoku</button><button data-action="quick-chat" data-game="trivia">✦ Trivia</button><button data-action="quick-chat" data-game="brain">◎ Same Brain</button>
     </div>
     <div class="social-messages" id="socialMessages">${renderChatMessages()}</div>
-    <div id="typingLine" class="typing-line ${state.social.typing?'show':''}">${state.social.typing?`${esc(label)} ${tr('typing')}`:''}</div>
-    <div class="chat-compose"><button class="sketch-mini" data-action="sketch-pad">✎</button><input id="chatInput" maxlength="240" placeholder="${state.lang==='es'?'Escribe un mensaje…':'Write a message…'}"><button data-action="chat-send">↑</button></div>
+    <div id="typingLine" class="typing-line ${state.social.typing?'show':''}">${state.social.typing?typingContent():''}</div>
+    <div id="photoDraft">${photoDraftMarkup()}</div><p id="photoStatus" class="photo-upload-status" role="status"></p><div class="chat-compose"><button class="sketch-mini" data-action="photo-attach" aria-label="${word('Adjuntar fotografía','Attach photograph')}">+</button><input type="file" id="chatPhotoInput" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden><input id="chatInput" maxlength="2000" aria-label="${word('Escribe un mensaje','Write a message')}" placeholder="${state.lang==='es'?'Escribe un mensaje…':'Write a message…'}"><button data-action="chat-send">↑</button></div>
   </aside>`
 }
 function refreshSocialDock(){
   const panel=document.querySelector('#socialPanel'), pp=partnerPresence(), label=partnerLabel()
   const presence=document.querySelector('#socialPresenceText')
   if(presence) presence.innerHTML=`<i class="presence-dot ${pp?'on':''}"></i>${pp?`${tr('online')}${pp.screen?` · ${esc(pp.screen)}`:''}`:tr('offline')}`
-  const msgs=document.querySelector('#socialMessages'); if(msgs){msgs.innerHTML=renderChatMessages();msgs.scrollTop=msgs.scrollHeight}
+  const msgs=document.querySelector('#socialMessages');if(msgs){const nearBottom=msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<80;const previous=msgs.scrollTop;msgs.innerHTML=renderChatMessages();msgs.scrollTop=nearBottom?msgs.scrollHeight:previous;chatMedia.hydrate(msgs).catch(()=>{})}
   const fab=document.querySelector('.social-fab');if(fab){fab.classList.toggle('online',Boolean(pp));const old=fab.querySelector('i');if(old)old.remove();if(state.social.unread){const i=document.createElement('i');i.textContent=Math.min(9,state.social.unread);fab.appendChild(i)}}
-  const typing=document.querySelector('#typingLine');if(typing){typing.classList.toggle('show',Boolean(state.social.typing));typing.textContent=state.social.typing?`${partnerLabel()} ${tr('typing')}`:''}
+  const typing=document.querySelector('#typingLine');if(typing){typing.classList.toggle('show',Boolean(state.social.typing));typing.innerHTML=state.social.typing?typingContent():''}
 }
 async function updatePresence(screen=state.screen){
   if(!state.profile||QA.active)return
@@ -265,7 +291,7 @@ function receiveChatMessage(msg){
   if(!((msg.from_player===me&&msg.to_player===other)||(msg.from_player===other&&msg.to_player===me)))return
   if(state.social.messages.some(x=>(msg.id&&String(x.id)===String(msg.id))||(msg.client_id&&x.client_id===msg.client_id)))return
   state.social.messages=mergeMessages(state.social.messages,[msg])
-  if(msg.from_player!==me&&!state.social.open){state.social.unread++;if(!['minute','library','rain-room'].includes(state.screen)){sky.receive(msg);beep('signal')}}
+  if(msg.from_player!==me){if(!state.social.open){state.social.unread++;signalResonance(msg)}if(shouldSound({from:msg.from_player,me,qa:QA.active,sound:state.sound,notificationSound:state.notificationSound,discreet:state.discreet,quiet:['minute','library','rain-room'].includes(state.screen)}))signalAudio.play(msg.kind,state.social.open);if(document.hidden&&!QA.active&&!state.discreet)showBrowserNotification(msg)}
   refreshSocialDock()
 }
 async function setupSocialLayer(){
@@ -278,7 +304,7 @@ async function setupSocialLayer(){
   ch.on('presence',{event:'sync'},()=>{state.social.presence=ch.presenceState()||{};refreshSocialDock()})
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'koraverse_messages'},({new:row})=>receiveChatMessage(row))
     .on('broadcast',{event:'chat_message'},({payload})=>receiveChatMessage(payload))
-    .on('broadcast',{event:'typing'},({payload})=>{if(payload?.from===otherDefault()){state.social.typing=payload.active?payload.from:null;refreshSocialDock();clearTimeout(state.social.typingTimer);state.social.typingTimer=setTimeout(()=>{state.social.typing=null;refreshSocialDock()},2200)}})
+    .on('broadcast',{event:'typing'},({payload})=>{if(payload?.from===otherDefault()){state.social.typing=payload.active?payload.from:null;refreshSocialDock();clearTimeout(state.social.typingTimer);state.social.typingTimer=setTimeout(()=>{state.social.typing=null;refreshSocialDock()},3000)}})
   await new Promise(resolve=>{
     const timeout=setTimeout(resolve,4500)
     ch.subscribe(status=>{
@@ -299,7 +325,7 @@ async function setupSocialLayer(){
   refreshSocialDock()
 }
 async function sendChatMessage(body,kind='text',metadata={}){
-  body=String(body||'').trim().slice(0,240);if(!body||!state.profile)return false
+  body=String(body||'').trim().slice(0,kind==='quote'?4000:2000);if((!body&&kind!=='photo')||!state.profile)return false;if(kind==='game_invite'&&!roomCode(metadata.room_code))return false
   const row={client_id:crypto.randomUUID(),from_player:state.profile.player_key,to_player:otherDefault(),body,kind,metadata,created_at:new Date().toISOString()}
   if(QA.active){receiveChatMessage({...row,id:'qa-'+row.client_id});return true}
   if(!state.dbReady){toast('Señales necesita Supabase conectado. Tu mensaje sigue en el campo.');return false}
@@ -308,6 +334,7 @@ async function sendChatMessage(body,kind='text',metadata={}){
     if(error||!data)throw error||new Error('No confirmation')
     receiveChatMessage(data)
     state.social.channel?.send({type:'broadcast',event:'chat_message',payload:data}).catch(()=>{})
+    notifyPersistedMessage(data);
     if(kind==='sketch')recordStar('first-sketch','Un dibujo cruzó el cielo','🎨')
     if(kind==='coffee_invite')recordStar('first-coffee','Una señal cálida','☕')
     return true
@@ -316,11 +343,11 @@ async function sendChatMessage(body,kind='text',metadata={}){
 async function toggleChat(){
   await loadChatMessages();state.social.open=!state.social.open;if(state.social.open)state.social.unread=0
   const p=document.querySelector('#socialPanel');if(p){p.classList.toggle('open',state.social.open);p.inert=!state.social.open}
-  refreshSocialDock();if(state.social.open)setTimer(()=>document.querySelector('#chatInput')?.focus(),120)
+  if(!state.social.open)typingPulse.stop();refreshSocialDock();if(state.social.open){const list=document.querySelector('#socialMessages');if(list)list.scrollTop=list.scrollHeight}if(state.social.open)setTimer(()=>document.querySelector('#chatInput')?.focus(),120)
 }
 
 async function sendTyping(active=true){
-  if(!state.social.channel||!state.profile)return
+  if(QA.active||!state.social.channel||!state.profile)return
   await state.social.channel.send({type:'broadcast',event:'typing',payload:{from:state.profile.player_key,active,ts:Date.now()}}).catch(()=>{})
 }
 function clearChatForMe(){
@@ -363,12 +390,13 @@ async function init(){
   if(saved){ try{ state.profile=JSON.parse(saved) }catch{} }
   if(state.profile){
     await hydrateProfile(); await loadStars(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
-    const queryRoom=new URLSearchParams(location.search).get('room')?.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
+    const deep=parseDuoLink(location.search),queryRoom=deep.code
     let savedRoom=null;try{savedRoom=JSON.parse(localStorage.getItem(ROOM_KEY)||'null')}catch{}
     if(queryRoom?.length===6){
       const role=savedRoom?.code===queryRoom?savedRoom.role:'guest'
-      return connectRoom(role||'guest',queryRoom)
+      return role==='host'?connectRoom('host',queryRoom):enterInvitation(queryRoom,deep.game)
     }
+    if(deep.signals){state.social.open=true;state.social.unread=0}
     renderHome()
   } else {await loadGateProfiles();renderGate()}
 }
@@ -477,8 +505,9 @@ function renderGate(){
 
 async function chooseProfile(name){
   state.profile=defaultProfile(name); localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile)); await hydrateProfile(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
-  const room=new URLSearchParams(location.search).get('room')?.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
-  if(room?.length===6)return connectRoom('guest',room)
+  const deep=parseDuoLink(location.search)
+  if(deep.code)return enterInvitation(deep.code,deep.game)
+  if(deep.signals){state.social.open=true;state.social.unread=0}
   renderHome()
 }
 
@@ -589,29 +618,27 @@ function renderTriviaHub(){
     ['mix','🎲','Mix Universe','Todo mezclado. El caos correcto.'],
   ]
   app.innerHTML=shell(`<section class="world-hero trivia-hero"><div><small>TRIVIA UNIVERSE · SOLO + DUO</small><h1>Preguntas,<br>pero con estilo.</h1><p>Juega solo para ganar XP personal o entra a Duo Realm para bloquear las respuestas hasta que ambos elijan.</p></div><div class="trivia-xp-card glass"><span>🎬</span><b>${state.profile.trivia_xp||0} XP</b><small>XP DE TRIVIA</small><button class="btn-v3 signal" data-action="duo-entry">Trivia Duo →</button></div></section>
-  <div class="trivia-category-grid">${cats.map(([id,icon,title,desc])=>`<button class="trivia-category" data-action="solo-trivia-start" data-cat="${id}"><span>${icon}</span><small>10 PREGUNTAS</small><h3>${title}</h3><p>${desc}</p><i>JUGAR SOLO →</i></button>`).join('')}</div>`,{world:'trivia',back:{action:'home',label:'Command Center'}})
+  <div class="trivia-category-grid">${cats.map(([id,icon,title,desc])=>`<button class="trivia-category" data-action="solo-trivia-start" data-cat="${id}"><span>${icon}</span><small>20 PREGUNTAS</small><h3>${title}</h3><p>${desc}</p><i>JUGAR SOLO →</i></button>`).join('')}</div>`,{world:'trivia',back:{action:'home',label:'Command Center'}})
 }
 function startSoloTrivia(cat='mix'){
-  const all=cat==='mix'?Object.values(triviaBank).flat():triviaBank[cat]
-  const queue=[...all].sort(()=>Math.random()-.5).slice(0,Math.min(10,all.length))
-  state.soloTrivia={category:cat,queue,index:0,score:0,streak:0,answered:false,selected:null};renderSoloTrivia()
+ const queue=triviaQueue(cat)
+ state.soloTrivia={category:cat,queue,index:0,score:0,streak:0,bestStreak:0,xp:0,finished:false,answered:false,selected:null};renderSoloTrivia()
 }
 function renderSoloTrivia(){
   const t=state.soloTrivia,q=t.queue[t.index];if(!q)return finishSoloTrivia()
   state.screen='trivia-play';const label={got:'GAME OF THRONES',marvel:'MARVEL',series:'SERIES',movies:'CINE',mix:'MIX UNIVERSE'}[t.category]||'TRIVIA'
-  app.innerHTML=shell(`<section class="duo-game-head"><button data-action="world" data-world="trivia">← Trivia Universe</button><span>${label} · ${t.index+1}/${t.queue.length}</span><span>🔥 ${t.streak}</span></section><div class="duo-question glass-xl solo-trivia-card"><small>TRIVIA SOLO</small><h1>${esc(q.q)}</h1><div class="trivia-options">${q.a.map((a,i)=>`<button data-action="solo-trivia-answer" data-index="${i}" class="${t.answered&&q.c===i?'correct':''} ${t.answered&&t.selected===i&&i!==q.c?'wrong':''}"><span>${String.fromCharCode(65+i)}</span>${esc(a)}</button>`).join('')}</div>${t.answered?`<div class="duo-result"><b>${t.selected===q.c?'CORRECT ✨':'REVELACIÓN'}</b><p>${t.selected===q.c?`Racha ${t.streak}. +8 XP`:`Respuesta correcta: ${esc(q.a[q.c])}`}</p><button class="btn-v3 primary" data-action="solo-trivia-next">${t.index===t.queue.length-1?'Ver resultado':'Siguiente →'}</button></div>`:''}</div>`,{world:'trivia'})
+  app.innerHTML=shell(`<section class="duo-game-head"><button data-action="world" data-world="trivia">← Trivia Universe</button><span>${label} · ${t.index+1}/${t.queue.length}</span><span>🔥 ${t.streak}</span></section><div class="duo-question glass-xl solo-trivia-card"><small>TRIVIA SOLO · ${esc(q.difficulty||'medium')}</small><h1>${esc(q.q)}</h1><div class="trivia-options">${q.a.map((a,i)=>`<button data-action="solo-trivia-answer" data-index="${i}" class="${t.answered&&q.c===i?'correct':''} ${t.answered&&t.selected===i&&i!==q.c?'wrong':''}"><span>${String.fromCharCode(65+i)}</span>${esc(a)}</button>`).join('')}</div>${t.answered?`<div class="duo-result"><b>${t.selected===q.c?'CORRECT ✨':'REVELACIÓN'}</b><p>${t.selected===q.c?`Racha ${t.streak}. +4 XP`:`Respuesta correcta: ${esc(q.a[q.c])}`}</p><p class="trivia-explanation">${esc(q.explanation||'')}</p><button class="btn-v3 primary" data-action="solo-trivia-next">${t.index===t.queue.length-1?'Ver resultado':'Siguiente →'}</button></div>`:''}</div>`,{world:'trivia'})
 }
 async function answerSoloTrivia(index){
   const t=state.soloTrivia;if(t.answered)return;const q=t.queue[t.index];t.answered=true;t.selected=index
-  if(index===q.c){t.score++;t.streak++;await awardXP(8,'trivia','Trivia Solo')}else t.streak=0
+  if(index===q.c){t.score++;t.streak++;t.bestStreak=Math.max(t.bestStreak||0,t.streak);t.xp+=4;await awardXP(4,'trivia','Trivia Solo')}else t.streak=0
   beep(index===q.c?'good':'bad');renderSoloTrivia()
 }
 function nextSoloTrivia(){const t=state.soloTrivia;t.index++;t.answered=false;t.selected=null;if(t.index>=t.queue.length)return finishSoloTrivia();renderSoloTrivia()}
 async function finishSoloTrivia(){
-  const t=state.soloTrivia,bonus=t.score>=8?20:t.score>=5?10:5;await awardXP(bonus,'trivia','Trivia Finish',{silent:true});if(t.score>=8)confetti(55)
-  app.innerHTML=shell(`<section class="result-screen"><div class="result-orb">🎬</div><small>TRIVIA COMPLETE</small><h1>${t.score}/${t.queue.length}</h1><p>${t.score>=8?'El universo sospecha que estabas estudiando.':t.score>=5?'Bastante digno.':'Se acepta revancha inmediatamente.'} · +${bonus} bonus XP</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="solo-trivia-start" data-cat="${t.category}">Otra ronda</button><button class="btn-v3 soft" data-action="world" data-world="trivia">Trivia Universe</button></div></section>`,{world:'trivia'})
+ const t=state.soloTrivia;if(t.finished)return;t.finished=true;const bonus=t.score>=15?20:t.score>=11?10:5;t.xp+=bonus;await awardXP(bonus,'trivia','Trivia Finish',{silent:true});if(t.score>=15)confetti(55)
+ app.innerHTML=shell('<section class="result-screen"><div class="result-orb">✦</div><small>TRIVIA COMPLETE</small><h1>'+t.score+'/'+t.queue.length+'</h1><h2>'+triviaRank(t.score,state.lang)+'</h2><p>'+Math.round(t.score/t.queue.length*100)+'% · '+word('Dificultad mixta','Mixed difficulty')+' · '+t.xp+' XP · '+word('Mejor racha: ','Best streak: ')+(t.bestStreak||0)+'</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="solo-trivia-start" data-cat="'+esc(t.category)+'">'+word('Otra ronda','Another round')+'</button><button class="btn-v3 soft" data-action="world" data-world="trivia">Trivia Universe</button></div></section>',{world:'trivia'})
 }
-
 function renderEnglishHub(){
   state.screen='english'; clearTimers(); const daily=englishCurriculum[(new Date().getDate()-1)%englishCurriculum.length]
   const mastery=Math.min(100,Math.round((state.profile.english_xp||0)/8))
@@ -713,18 +740,18 @@ function drawCase(ctx,x,y,label){ctx.save();ctx.translate(x,y);ctx.shadowBlur=12
 async function finishInvaders(){const inv=state.invaders;if(!inv?.active)return;inv.active=false;if(state.raf)cancelAnimationFrame(state.raf);const xp=25+inv.score*3;await awardXP(xp,'arcade','Case Invaders',{duo:inv.duo});if(inv.duo)sendRoom('arcade_done',{score:inv.score});app.innerHTML=shell(`<section class="result-screen"><div class="result-orb danger-r">🚀</div><small>OLEADA COMPLETA</small><h1>${inv.score}</h1><p>casos destruidos · +${xp} XP</p><div class="hero-buttons"><button class="btn-v3 primary" data-action="case-invaders">Otra wave</button><button class="btn-v3 soft" data-action="${inv.duo?'duo-hub':'world'}" ${!inv.duo?'data-world="arcade"':''}>${inv.duo?'Duo Realm':'Arcade'}</button></div></section>`,{world:'arcade'})}
 
 // ---------- CHILL ----------
-function renderGarden(){state.screen='garden';clearTimers();const flowers=Array.from({length:34},(_,i)=>`<button class="flower-v3" style="--x:${3+Math.random()*94}%;--y:${3+Math.random()*40}%;--d:${Math.random()*2}s;--c:${random(['#ff8fb1','#ffe16f','#a886ff','#ffac78','#7fdca7','#6fc7ff'])}" data-action="garden-flower"></button>`).join('');app.innerHTML=shell(`<section class="garden-v3"><div class="garden-sky"><div class="sun-v3"></div><div class="cloud-v3 c1"></div><div class="cloud-v3 c2"></div></div><div class="garden-message glass"><small>THE GARDEN</small><h2>Por hoy, el caos puede esperar.</h2><p id="gardenQuote">${random(gardenQuotes)}</p></div>${flowers}<div class="garden-ground"></div><div class="garden-inhabitant">${avatarVisual(state.profile.avatar_id,'lg')}</div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
+function renderGarden(){state.screen='garden';clearTimers();const flowers=Array.from({length:34},(_,i)=>`<button class="flower-v3" style="--x:${3+Math.random()*94}%;--y:${3+Math.random()*40}%;--d:${Math.random()*2}s;--c:${random(['#ff8fb1','#ffe16f','#a886ff','#ffac78','#7fdca7','#6fc7ff'])}" data-action="garden-flower"></button>`).join('');app.innerHTML=shell(`<section class="garden-v3"><div class="garden-sky"><div class="sun-v3"></div><div class="cloud-v3 c1"></div><div class="cloud-v3 c2"></div></div><div class="garden-message glass"><small>THE GARDEN</small><h2>Por hoy, el caos puede esperar.</h2><p id="gardenQuote">${esc(random(gardenQuotes))}</p><button class="quiet-link" data-action="share-quote" data-source="garden">${word('Compartir en chat','Share in chat')}</button></div>${flowers}<div class="garden-ground"></div><div class="garden-inhabitant">${avatarVisual(state.profile.avatar_id,'lg')}</div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function starDrift(){state.screen='star-drift';app.innerHTML=shell(`<section class="drift"><div class="drift-copy"><small>STAR DRIFT · PAUSA DE 2 MIN</small><h1>Aquí no tienes que ganar nada.</h1><p>Mueve el cursor. Respira. Recoge luz si quieres.</p></div><div class="drift-field" id="driftField"><div class="drift-star" id="driftStar">✦</div>${Array.from({length:24},()=>`<i style="left:${Math.random()*96}%;top:${Math.random()*94}%;animation-delay:${Math.random()*3}s"></i>`).join('')}</div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}});const f=document.querySelector('#driftField'),s=document.querySelector('#driftStar');f.onpointermove=e=>{const r=f.getBoundingClientRect();s.style.transform=`translate(${e.clientX-r.left-18}px,${e.clientY-r.top-18}px)`}}
 function coffeeBreak(){
   state.screen='coffee'
   const qs=['¿Qué fue lo menos terrible de hoy?','Si pudieras salir ahora mismo, ¿a dónde irías?','¿Qué canción describiría tu energía de este momento?','¿Qué pequeña cosa te gustaría que pasara antes de terminar el día?','¿Café, postre, libro o paseo?']
   app.innerHTML=shell(`<section class="coffee-premium"><div class="coffee-main"><div class="coffee-cup">☕</div><small>COFFEE BREAK · SOCIAL CHILL</small><h1>${random(qs)}</h1><p>No hay respuesta correcta. Pero sí puedes convertir la pausa digital en una invitación real.</p><div class="coffee-actions">${coffeeActions.map(a=>`<button data-action="coffee-invite" data-coffee="${a.id}"><span>${a.icon}</span><b>${a.label}</b><small>${partnerIsOnline()?'Enviar ahora':'Quedará en el chat'}</small></button>`).join('')}</div><button class="btn-v3 soft" data-action="coffee">Otra pregunta</button></div><aside class="coffee-status glass"><small>DUO ESTADO</small>${avatarVisual(state.profiles.find(p=>p.player_key===otherDefault())?.avatar_id||'cow-classic','lg',otherDefault())}<b>${esc(partnerLabel())}</b><p><i class="presence-dot ${partnerIsOnline()?'on':''}"></i>${partnerIsOnline()?'Online en KORAVERSE':'Offline · verá tu invitación al entrar'}</p><button class="btn-v3 soft" data-action="chat-toggle">Abrir chat</button></aside></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})
 }
-async function sendCoffeeInvite(id){const item=coffeeActions.find(x=>x.id===id)||coffeeActions[0];const ok=await sendChatMessage(item.message,'coffee_invite',{action:id});if(!ok)return;toast(item.icon+' '+word('Invitación enviada','Invitation sent'),'signal');beep('signal');if(!QA.active)fetch('/api/kora-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_player:state.profile.player_key,to_player:otherDefault(),from_name:state.profile.display_name,message:item.message,kind:'coffee'})}).catch(()=>{})}
+async function sendCoffeeInvite(id){const item=coffeeActions.find(x=>x.id===id)||coffeeActions[0];const ok=await sendChatMessage(item.message,'coffee_invite',{action:id});if(!ok)return;toast(item.icon+' '+word('Invitación enviada','Invitation sent'),'signal');beep('signal')}
 function rainRoom(){state.screen='rain-room';app.innerHTML=shell(`<section class="rain-room"><div class="rain-window">${Array.from({length:70},(_,i)=>`<i style="--x:${Math.random()*100}%;--d:${Math.random()*2.4}s;--s:${.7+Math.random()*1.4}"></i>`).join('')}<div class="rain-copy glass"><small>SALA DE LLUVIA</small><h1>Nada que resolver.</h1><p>Quédate aquí un minuto. La lluvia no necesita seguimiento.</p><button class="btn-v3 soft" data-action="coffee-invite" data-coffee="five">Invitar a mini break</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function moodOrbit(){state.screen='mood';const moods=[['calm','🌿','Tranquilo'],['tired','🌙','Cansado'],['chaos','⚡','Caos'],['happy','✨','Bien'],['quiet','☁️','Silencio']];app.innerHTML=shell(`<section class="mood-room"><small>MOOD ORBIT</small><h1>¿Qué energía tiene el día?</h1><p>Esto no puntúa. Solo cambia un poco el universo.</p><div class="mood-grid">${moods.map(([id,ic,label])=>`<button class="${state.mood===id?'active':''}" data-action="mood-select" data-mood="${id}"><span>${ic}</span><b>${label}</b></button>`).join('')}</div><div class="mood-planet mood-${state.mood||'calm'}"></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 function selectMood(m){state.mood=m;beep('soft');moodOrbit()}
-function quietLibraryRoom(){state.screen='library';app.innerHTML=shell(`<section class="quiet-library"><div class="library-card glass-xl"><span>📖</span><small>BIBLIOTECA TRANQUILA</small><h1>${esc(random(quietLibrary))}</h1><p>Una página imaginaria. Cero notificaciones durante exactamente el tiempo que tú decidas.</p><div class="hero-buttons"><button class="btn-v3 soft" data-action="quiet-library">Otra página</button><button class="btn-v3 signal" data-action="quick-chat" data-message="Te encontré una frase bonita en Silencio Library 📖">Compartir en chat</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
+function quietLibraryRoom(){state.screen='library';app.innerHTML=shell(`<section class="quiet-library"><div class="library-card glass-xl"><span>📖</span><small>BIBLIOTECA TRANQUILA</small><h1>${esc(random(quietLibrary))}</h1><p>Una página imaginaria. Cero notificaciones durante exactamente el tiempo que tú decidas.</p><div class="hero-buttons"><button class="btn-v3 soft" data-action="quiet-library">Otra página</button><button class="btn-v3 signal" data-action="share-quote" data-source="quiet-library">Compartir en chat</button></div></div></section>`,{world:'chill',back:{action:'world',world:'chill',label:'Chill Zone'}})}
 
 
 // ---------- PROFILE / AVATARS / PODIUM ----------
@@ -783,16 +810,8 @@ async function setupSignalChannel(){
     .subscribe()
 }
 
-async function sendSignal(){
-  if(QA.active)return toast('Señal simulada en QA')
-  const to=otherDefault(),from=state.profile.player_key,msg=`${state.profile.display_name} quiere jugar contigo.`
-  await sendChatMessage(msg,'game_invite',{room_code:state.room.code})
-  if(state.signalChannel) await state.signalChannel.send({type:'broadcast',event:'signal',payload:{from,to,message:msg,ts:Date.now()}})
-  if(state.dbReady) supabase.from('koraverse_signals').insert({from_player:from,to_player:to,message:msg}).then(()=>{})
-  // Push real si el backend opcional fue configurado. Si no, falla silenciosamente y Realtime sigue funcionando.
-  fetch('/api/kora-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_player:from,to_player:to,from_name:state.profile.display_name})}).catch(()=>{})
-  toast('KORA SIGNAL enviado ✨','signal');beep('signal')
-}
+async function sendSignal(){return quickGameInvite('trivia')}
+function notifyPersistedMessage(msg){if(QA.active||!state.dbReady)return;fetch('/api/chat-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:msg.id,from_player:msg.from_player,to_player:msg.to_player,kind:msg.kind})}).catch(()=>{})}
 async function receiveSignal(payload){state.pendingSignal={from_player:payload.from,message:payload.message};beep('signal');toast(payload.message||'Tu cómplice quiere jugar.','signal');showBrowserNotification('KORA SIGNAL',payload.message||'Tu cómplice quiere jugar contigo.');if(state.screen==='home')renderHome()}
 async function checkPendingSignals(){if(!state.dbReady||!state.profile)return;try{const {data}=await supabase.from('koraverse_signals').select('*').eq('to_player',state.profile.player_key).eq('seen',false).order('created_at',{ascending:false}).limit(1);if(data?.[0])state.pendingSignal=data[0]}catch{}}
 async function enableNotifications(){
@@ -811,7 +830,7 @@ async function enableNotifications(){
   }catch{toast('Alertas activadas; push cerrado requiere configuración VAPID')}
 }
 function urlBase64ToUint8Array(base64String){const padding='='.repeat((4-base64String.length%4)%4);const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(base64);return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)))}
-async function showBrowserNotification(title,body){title='KORA-Señal';body='Hay una señal esperándote en KORAVERSE.';if(!('Notification' in window)||Notification.permission!=='granted')return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'KORA_SIGNAL',title,body})}catch{try{new Notification(title,{body})}catch{}}}
+async function showBrowserNotification(message={}){if(QA.active||state.discreet||!document.hidden||!('Notification' in window)||Notification.permission!=='granted')return;const data=notificationData(typeof message==='object'?message:{});try{const reg=await navigator.serviceWorker?.getRegistration();if(reg?.active){reg.active.postMessage({type:'KORA_SIGNAL',...data});return}}catch{}try{const notice=new Notification(data.title,{body:data.body,tag:data.tag});notice.onclick=()=>{window.focus();notice.close();if(data.room_code)enterInvitation(data.room_code,data.game);else{state.social.open=true;state.social.unread=0;refreshSocialDock()}}}catch{}}
 
 // ---------- DUO REALTIME ----------
 function roomPlayer(){return {player_key:state.profile.player_key,name:state.profile.display_name,avatar_id:state.profile.avatar_id||'cow-classic',device:deviceId,role:state.room.role}}
@@ -821,10 +840,10 @@ async function connectRoom(role,code){
   if(!supabase)return toast('Supabase no está configurado.')
   let cached=null;try{cached=role==='host'?JSON.parse(localStorage.getItem(`koraverse_v3_host_${code}`)||'null'):null}catch{}
   await leaveRoom(false,{keepHostCache:true});state.room.code=code;state.room.role=role;state.room.game=cached||freshDuoGame();localStorage.setItem(ROOM_KEY,JSON.stringify({code,role}))
-  history.replaceState({},'',`${location.pathname}?room=${code}`)
+  state.room.receivedState=role==='host';history.replaceState({},'',roomLink(code,null,location.pathname))
   const ch=supabase.channel(`koraverse-room-v3-${code}`,{config:{presence:{key:sessionId},broadcast:{self:true}}});state.room.channel=ch
-  ch.on('presence',{event:'sync'},()=>{state.room.players=roomPlayers();if(state.screen.startsWith('duo'))renderDuoScreen()})
-    .on('broadcast',{event:'state'},({payload})=>{if(state.room.role!=='host'){state.room.game=payload.game;if(payload.game.chessCheckBy===state.profile.player_key)recordStar('first-check','Tu primer jaque','♟');renderDuoScreen()}})
+  ch.on('presence',{event:'sync'},()=>{state.room.players=roomPlayers();const game=state.room.game.invitedGame;if(state.room.role==='host'&&GAMES[game]&&state.room.game.screen==='lobby'&&activeDuoPlayers().length===2){state.room.game.invitedGame=null;applyDuoAction(game,{})}else if(state.screen.startsWith('duo'))renderDuoScreen()})
+    .on('broadcast',{event:'state'},({payload})=>{if(state.room.role!=='host'){state.room.receivedState=true;state.room.game=payload.game;if(payload.game.chessCheckBy===state.profile.player_key)recordStar('first-check','Tu primer jaque','♟');renderDuoScreen()}})
     .on('broadcast',{event:'need_state'},()=>{if(state.room.role==='host')broadcastGame()})
     .on('broadcast',{event:'action'},({payload})=>onRoomAction(payload))
     .on('broadcast',{event:'trivia_answer'},({payload})=>onTriviaAnswer(payload))
@@ -837,7 +856,7 @@ async function connectRoom(role,code){
     .on('broadcast',{event:'arcade_hit'},()=>{if(state.invaders?.duo){state.invaders.shared++;const el=document.querySelector('#sharedHits');if(el)el.textContent=state.invaders.shared}})
     .on('broadcast',{event:'xp_award'},({payload})=>onXpAward(payload))
   const ready=await new Promise(resolve=>{const timeout=setTimeout(()=>resolve(false),6000);ch.subscribe(async status=>{if(state.room.channel!==ch)return;if(status==='SUBSCRIBED'){clearTimeout(timeout);state.room.connected=true;await ch.track(roomPlayer());if(role==='guest')sendRoom('need_state',{});resolve(true)}else if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)){state.room.connected=false;clearTimeout(timeout);resolve(false)}})});if(!ready){await leaveRoom(false);toast('No se pudo conectar la sala. Reintenta cuando vuelva la conexión.');return openDuoEntry()}
-  state.screen='duo-lobby';if(role==='guest')sendRoom('need_state',{});renderDuoScreen()
+  state.screen='duo-lobby';if(role==='guest')sendRoom('need_state',{});renderDuoScreen();return true
 }
 async function leaveRoom(render=true,{keepHostCache=false}={}){const oldCode=state.room.code,oldRole=state.room.role;if(state.room.channel&&supabase)await supabase.removeChannel(state.room.channel);state.room={code:null,role:null,channel:null,players:[],connected:false,game:freshDuoGame()};localStorage.removeItem(ROOM_KEY);if(!keepHostCache&&oldCode&&oldRole==='host')localStorage.removeItem(`koraverse_v3_host_${oldCode}`);history.replaceState({},'',location.pathname);if(render)renderHome()}
 async function sendRoom(event,payload){if(state.room.channel)await state.room.channel.send({type:'broadcast',event,payload:{...payload,player_key:state.profile.player_key,name:state.profile.display_name,ts:Date.now()}})}
@@ -864,7 +883,7 @@ function applyDuoAction(action,data){
   const g=state.room.game;const players=activeDuoPlayers()
   if(action==='start'){g.screen='hub';g.mode=null}
   else if(action==='hub'){g.screen='hub';g.mode=null}
-  else if(action==='trivia'){const cat=data.cat||random(Object.keys(triviaBank)),q=random(triviaBank[cat]);g.screen='game';g.mode='trivia';g.round++;g.trivia={cat,q};g.answers={};g.result=null}
+  else if(action==='trivia'){if(!advanceDuoTrivia(g,data.cat||'mix',players))return}
   else if(action==='brain'){g.screen='game';g.mode='brain';g.round++;g.brain=random(sameBrain);g.brainAnswers={};g.brainResult=null}
   else if(action==='mission'){g.screen='game';g.mode='mission';g.round++;const assignee=random(players),validator=players.find(x=>x!==assignee)||assignee;g.mission={text:random(missions),assignee,validator,status:'pending'}}
   else if(action==='sudoku'){const p=sudokuPuzzles[0];g.screen='game';g.mode='sudoku';g.round++;g.sudokuId=p.id;g.sudokuBoard=p.puzzle.split('').map(Number);g.sudokuFixed=p.puzzle.split('').map(x=>x!=='0');g.sudokuStatus=null}
@@ -909,8 +928,8 @@ async function onChessMove(p){
   try{const mv=game.move({from:p.from,to:p.to,promotion:p.promotion||'q'});if(!mv)return;g.chessFen=game.fen();g.chessHistory=[...(g.chessHistory||[]),mv.san];g.chessLastMove={from:mv.from,to:mv.to};g.chessCheckBy=game.isCheck()?p.player_key:null;if(g.chessCheckBy===state.profile.player_key)recordStar('first-check','Tu primer jaque','♟');g.chessStatus=game.isCheckmate()?'Jaque mate':game.isDraw()?'Tablas':game.isCheck()?'Jaque':'En juego';if(game.isGameOver()){const players=activeDuoPlayers();if(game.isCheckmate())grantDuoPlayerXP([p.player_key],50,'Chess Duo');grantDuoPlayerXP(players.filter(x=>x!==p.player_key),20,'Chess Duo');awardDuoXP(20)}broadcastGame()}catch{}
 }
 
-function renderDuoTrivia(){const g=state.room.game,q=g.trivia.q;const mine=g.answers[state.profile.player_key];const result=g.result;app.innerHTML=shell(`<section class="duo-game-head"><button data-action="duo-hub">← Duo Realm</button><span>${g.trivia.cat.toUpperCase()} · RONDA ${g.round}</span><span>${Object.keys(g.answers).length}/2 BLOQUEADAS</span></section><div class="duo-question glass-xl"><small>TRIVIA REALM</small><h1>${esc(q.q)}</h1><div class="trivia-options">${q.a.map((a,i)=>`<button data-action="duo-trivia-answer" data-index="${i}" class="${mine===i?'locked':''} ${result&&q.c===i?'correct':''}"><span>${String.fromCharCode(65+i)}</span>${esc(a)}</button>`).join('')}</div>${mine!=null&&!result?'<div class="answer-lock">🔒 Respuesta bloqueada. Esperando la otra dimensión...</div>':''}${result?`<div class="duo-result"><b>${result.both?'DUO PERFECT ✨':'REVELACIÓN'}</b><p>${result.text}</p><button class="btn-v3 primary" data-action="duo-game" data-game="trivia">Siguiente ronda</button></div>`:''}</div>`,{world:'duo'})}
-async function onTriviaAnswer(p){if(state.room.role!=='host'||state.room.game.mode!=='trivia'||p.round!==state.room.game.round)return;const g=state.room.game;if(g.answers[p.player_key]!=null)return;g.answers[p.player_key]=p.index;const players=activeDuoPlayers();if(players.length>=2&&players.every(k=>g.answers[k]!=null)){const c=g.trivia.q.c;const correct=players.filter(k=>g.answers[k]===c);g.result={both:correct.length===2,text:players.map(k=>`${k}: ${g.answers[k]===c?'correcta ✅':'incorrecta'}`).join(' · ')};grantDuoPlayerXP(correct,20,'Trivia Duo');if(correct.length===2)awardDuoXP(12)}broadcastGame()}
+function renderDuoTrivia(){const g=state.room.game,session=g.triviaSession;if(session?.complete){app.innerHTML=shell('<section class="result-screen"><small>TRIVIA DUO · 20 / 20</small><h1>'+word('Dos órbitas, veinte preguntas.','Two orbits, twenty questions.')+'</h1>'+Object.entries(session.scores).map(([p,n])=>'<p>'+esc(p)+' · '+n+'/20 · '+triviaRank(n,state.lang)+'</p>').join('')+'<button class="btn-v3 primary" data-action="duo-game" data-game="trivia">'+word('Otra partida','Another game')+'</button></section>',{world:'duo',back:{action:'duo-hub',label:'Duo Realm'}});return}const q=g.trivia.q,mine=g.answers[state.profile.player_key],result=g.result;app.innerHTML=shell('<section class="duo-game-head"><button data-action="duo-hub">← Duo Realm</button><span>'+esc(g.trivia.cat.toUpperCase())+' · '+(session?session.index+1:g.round)+' / '+(session?.queue.length||20)+'</span><span>'+Object.keys(g.answers).length+'/2 '+word('BLOQUEADAS','LOCKED')+'</span></section><div class="duo-question glass-xl"><small>'+esc(q.difficulty||'medium')+'</small><h1>'+esc(q.q)+'</h1><div class="trivia-options">'+q.a.map((a,i)=>'<button '+(mine!=null?'disabled':'')+' data-action="duo-trivia-answer" data-index="'+i+'" class="'+(mine===i?'locked ':'')+(result&&q.c===i?'correct':'')+'"><span>'+String.fromCharCode(65+i)+'</span>'+esc(a)+'</button>').join('')+'</div>'+(mine!=null&&!result?'<div class="answer-lock">'+word('Respuesta bloqueada. Esperando la otra dimensión…','Answer locked. Waiting for the other orbit…')+'</div>':'')+(result?'<div class="duo-result"><b>'+esc(result.text)+'</b><p class="trivia-explanation">'+esc(q.explanation||'')+'</p><button class="btn-v3 primary" data-action="duo-game" data-game="trivia">'+word(session?.index===19?'Ver resultado':'Siguiente pregunta',session?.index===19?'Show results':'Next question')+'</button></div>':'')+'</div>',{world:'duo'})}
+async function onTriviaAnswer(p){if(state.room.role!=='host'||state.room.game.mode!=='trivia'||p.round!==state.room.game.round)return;const g=state.room.game,settled=settleDuoTrivia(g,p.player_key,p.index,activeDuoPlayers());if(!settled)return;if(!settled.pending&&settled.correct.length)grantDuoPlayerXP(settled.correct,4,'Trivia Duo');broadcastGame()}
 
 function renderDuoBrain(){const g=state.room.game,mine=g.brainAnswers[state.profile.player_key],result=g.brainResult;app.innerHTML=shell(`<section class="duo-game-head"><button data-action="duo-hub">← Duo Realm</button><span>SAME BRAIN · RONDA ${g.round}</span><span>${Object.keys(g.brainAnswers).length}/2 BLOQUEADAS</span></section><div class="duo-question glass-xl"><small>SYNC MODE EVOLUCIONADO</small><h1>${esc(g.brain.q)}</h1><div class="brain-options">${g.brain.o.map((o,i)=>`<button data-action="duo-brain-answer" data-index="${i}" class="${mine===i?'locked':''}">${esc(o)}</button>`).join('')}</div>${mine!=null&&!result?'<div class="answer-lock">🧠 Elección bloqueada. No hagas trampa.</div>':''}${result?`<div class="same-reveal ${result.same?'same':''}"><span>${result.same?'✨':'↯'}</span><b>${result.same?'SAME BRAIN':'DISTINTAS DIMENSIONES'}</b><p>${result.text}</p><button class="btn-v3 primary" data-action="duo-game" data-game="brain">Otra</button></div>`:''}</div>`,{world:'duo'})}
 async function onBrainAnswer(p){if(state.room.role!=='host'||state.room.game.mode!=='brain'||p.round!==state.room.game.round)return;const g=state.room.game;if(g.brainAnswers[p.player_key]!=null)return;g.brainAnswers[p.player_key]=p.index;const ps=activeDuoPlayers();if(ps.length>=2&&ps.every(k=>g.brainAnswers[k]!=null)){const same=g.brainAnswers[ps[0]]===g.brainAnswers[ps[1]];g.brainResult={same,text:ps.map(k=>`${k}: ${g.brain.o[g.brainAnswers[k]]}`).join(' · ')};if(same)grantDuoPlayerXP(ps,15,'Same Brain')}broadcastGame()}
@@ -939,7 +958,7 @@ app.addEventListener('click',async e=>{
   if(a==='home')return travelTo('home')
   if(a==='world')return travelTo(el.dataset.world)
   if(a==='profile')return travelTo('profile')
-  if(a==='switch-profile'){if(QA.active)return toast('Sal de QA antes de cambiar de jugador.');clearInterval(socialHeartbeat);if(state.social.channel)await supabase?.removeChannel(state.social.channel);await leaveRoom(false);state.social={channel:null,presence:{},messages:[],open:false,loaded:false,unread:0,typing:null};if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
+  if(a==='switch-profile'){if(QA.active)return toast('Sal de QA antes de cambiar de jugador.');typingPulse.stop();clearPhotoDraft();await chatMedia.signOut();clearInterval(socialHeartbeat);if(state.social.channel)await supabase?.removeChannel(state.social.channel);await leaveRoom(false);state.social={channel:null,presence:{},messages:[],open:false,loaded:false,unread:0,typing:null};if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
   if(a==='sound'){state.sound=!state.sound;localStorage.setItem(SOUND_KEY,state.sound?'on':'off');toast(state.sound?'Sonido activado':'Sonido desactivado');return state.screen==='home'?renderHome():null}
   if(a==='language'){state.lang=state.lang==='es'?'en':'es';localStorage.setItem(LANG_KEY,state.lang);if(state.profile){state.profile.language=state.lang;await persistProfile(false)}return rerenderPrimary()}
   if(a==='theme'){const id=el.dataset.theme;if(!THEME_IDS.includes(id))return;state.theme=id;localStorage.setItem(THEME_KEY,id);if(state.profile){state.profile.theme_id=id;await persistProfile(false)}applyTheme();return renderProfile()}
@@ -947,14 +966,15 @@ app.addEventListener('click',async e=>{
   if(a==='quick-play'){const pick=random(['invaders','memory','chaos','sudoku','trivia']);if(pick==='memory')return startMemory();if(pick==='chaos')return startCaos();if(pick==='sudoku')return startSudoku();if(pick==='trivia')return startSoloTrivia('mix');return startInvaders()}
   if(a==='send-signal')return sendSignal()
   if(a==='chat-toggle')return toggleChat()
-  if(a==='chat-send'){const input=document.querySelector('#chatInput');const v=input?.value||'';el.disabled=true;const ok=await sendChatMessage(v);el.disabled=false;if(ok&&input)input.value='';sendTyping(false);return}
+  if(a==='chat-send'){el.disabled=true;try{return await sendComposer()}finally{el.disabled=false}}
+
   if(a==='chat-clear')return clearChatForMe()
   if(a==='sketch-pad')return renderSketchPad()
   if(a==='sketch-clear')return clearSketch()
   if(a==='sketch-eraser'){state.sketch.eraser=!state.sketch.eraser;el.classList.toggle('active',state.sketch.eraser);return}
   if(a==='sketch-save')return saveSketch()
   if(a==='sketch-send')return sendSketch()
-  if(a==='quick-chat')return sendChatMessage(el.dataset.message||'Hola ✨',el.dataset.game?'game_invite':'text',el.dataset.game?{game:el.dataset.game,room_code:state.room.code}: {})
+  if(a==='quick-chat')return el.dataset.game?quickGameInvite(el.dataset.game):sendChatMessage(el.dataset.message||'Hola ✨')
   if(a==='coffee-invite')return sendCoffeeInvite(el.dataset.coffee)
   if(a==='avatar-studio')return renderAvatarStudio()
   if(a==='select-avatar')return selectAvatar(el.dataset.avatar)
@@ -1017,9 +1037,11 @@ onRoomAction=function(p){
   return _onRoomAction(p)
 }
 
-document.addEventListener('input',e=>{if(e.target?.id==='chatInput'){sendTyping(true)}})
-function toggleDiscreet(){state.discreet=!state.discreet;document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));updatePresence();let el=document.querySelector('#discreetOverlay');if(state.discreet){if(!el){el=document.createElement('div');el.id='discreetOverlay';el.className='discreet-overlay';document.body.appendChild(el)}el.innerHTML=`<div><span class="brand-orb"></span><small>KORAVERSE FOCUS</small><b>${new Date().toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}</b><p>${state.lang==='es'?'Sesión pausada. Ctrl + Espacio para volver.':'Session paused. Ctrl + Space to return.'}</p></div>`;el.classList.add('show')}else el?.classList.remove('show')}
-document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();return toggleDiscreet()}if(e.key==='Enter'&&e.target?.id==='chatInput'){e.preventDefault();const input=e.target,v=input.value;sendTyping(false);sendChatMessage(v).then(ok=>{if(ok&&input.value===v)input.value=''})}})
+document.addEventListener('input',e=>{if(e.target?.id==='chatInput'){if(e.target.value.trim())typingPulse.input();else typingPulse.stop()}})
+document.addEventListener('focusout',e=>{if(e.target?.id==='chatInput')typingPulse.stop()})
+document.addEventListener('change',e=>{if(e.target?.id==='chatPhotoInput'){selectChatPhoto(e.target.files?.[0]);e.target.value=''}})
+function toggleDiscreet(){state.discreet=!state.discreet;if(state.discreet){typingPulse.stop();signalAudio.hush()}document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));updatePresence();let el=document.querySelector('#discreetOverlay');if(state.discreet){if(!el){el=document.createElement('div');el.id='discreetOverlay';el.className='discreet-overlay';document.body.appendChild(el)}el.innerHTML=`<div><span class="brand-orb"></span><small>KORAVERSE FOCUS</small><b>${new Date().toLocaleTimeString(state.lang==='es'?'es-DO':'en-US',{hour:'2-digit',minute:'2-digit'})}</b><p>${state.lang==='es'?'Sesión pausada. Ctrl + Espacio para volver.':'Session paused. Ctrl + Space to return.'}</p></div>`;el.classList.add('show')}else el?.classList.remove('show')}
+document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();return toggleDiscreet()}if(e.key==='Enter'&&e.target?.id==='chatInput'){e.preventDefault();sendComposer()}})
 
 const WORLDS = {
   refuge:{color:'#8da995',icon:'🌿',es:{name:'El Refugio',line:'Algunas cosas crecen mejor cuando nadie las apura.'},en:{name:'The Refuge',line:'Some things grow better when no one rushes them.'},activities:[['🌷','Garden','garden'],['☕','Coffee Break','coffee'],['🌌','Star Drift','star-drift'],['🌧','Rain Room','rain-room'],['📖','Reading Corner','quiet-library'],['🪐','Órbita de ánimo','mood-orbit'],['✦','Solo tengo un minuto','minute']]},
@@ -1104,12 +1126,12 @@ function constellationMarkup(){
 }
 function renderSettings(){
   clearTimers();state.screen='settings'
-  app.innerHTML=shell(`<section class="preferences"><small>${word('A TU RITMO','AT YOUR PACE')}</small><h1>${word('Un cielo a tu medida.','A sky of your own.')}</h1><div class="settings-grid"><article class="glass"><h2>${word('Ambiente espacial','Space ambience')}</h2><p>${word('Sonido original y suave. Tú decides cuándo empieza.','Soft, original sound. You decide when it begins.')}</p><button class="btn-v3 soft" data-action="ambient-toggle">${ambient.enabled?word('Silenciar','Mute'):word('Escuchar','Listen')}</button><label>${word('Volumen','Volume')}<input id="ambientVolume" type="range" min="0" max="100" value="${ambient.volume*100}"></label></article><article class="glass"><h2>${word('Movimiento','Motion')}</h2><label>${word('Calidad visual','Visual quality')}<select id="visualQuality"><option value="low">${word('Calma · movimiento mínimo','Calm · minimal motion')}</option><option value="balanced">${word('Equilibrada','Balanced')}</option><option value="high">${word('Completa','Full')}</option></select></label><button class="btn-v3 soft" data-action="discreet">${word('Modo discreto · Ctrl + Espacio','Discreet mode · Ctrl + Space')}</button></article><article class="glass"><h2>QA / Admin</h2><p>${word('Un laboratorio separado para probar tu universo.','A separate laboratory to test your universe.')}</p><button class="btn-v3 soft" data-action="qa">${word('Abrir laboratorio','Open laboratory')}</button></article></div></section>`,{world:'home',back:{action:'home',label:'Entre mundos'}})
+  app.innerHTML=shell(`<section class="preferences"><small>${word('A TU RITMO','AT YOUR PACE')}</small><h1>${word('Un cielo a tu medida.','A sky of your own.')}</h1><div class="settings-grid"><article class="glass"><h2>${word('Ambiente espacial','Space ambience')}</h2><p>${word('Sonido original y suave. Tú decides cuándo empieza.','Soft, original sound. You decide when it begins.')}</p><button class="btn-v3 soft" data-action="ambient-toggle">${ambient.enabled?word('Silenciar','Mute'):word('Escuchar','Listen')}</button><label>${word('Volumen','Volume')}<input id="ambientVolume" type="range" min="0" max="100" value="${ambient.volume*100}"></label></article><article class="glass"><h2>${word('Movimiento','Motion')}</h2><label>${word('Calidad visual','Visual quality')}<select id="visualQuality"><option value="low">${word('Calma · movimiento mínimo','Calm · minimal motion')}</option><option value="balanced">${word('Equilibrada','Balanced')}</option><option value="high">${word('Completa','Full')}</option></select></label><button class="btn-v3 soft" data-action="discreet">${word('Modo discreto · Ctrl + Espacio','Discreet mode · Ctrl + Space')}</button></article><article class="glass"><h2>${word('Sonidos de Señales','Signal sounds')}</h2><button class="btn-v3 soft" data-action="notification-sound" aria-pressed="${state.notificationSound}">${state.notificationSound?'ON':'OFF'}</button><button class="btn-v3 soft" data-action="notify-enable">${word('Activar notificaciones del navegador','Enable browser notifications')}</button><button class="btn-v3 soft" data-action="media-signout">${word('Cerrar sesión de fotos','Sign out of photographs')}</button></article><article class="glass"><h2>QA / Admin</h2><p>${word('Un laboratorio separado para probar tu universo.','A separate laboratory to test your universe.')}</p><button class="btn-v3 soft" data-action="qa">${word('Abrir laboratorio','Open laboratory')}</button></article></div></section>`,{world:'home',back:{action:'home',label:'Entre mundos'}})
   document.querySelector('#visualQuality').value=document.documentElement.dataset.quality
 }
 function renderQA(){
   state.screen='qa';clearTimers()
-  app.innerHTML=shell(`<section class="preferences"><small>QA / ADMIN</small><h1>${QA.active?'Laboratorio de prueba':'Acceso al laboratorio'}</h1>${QA.active?`<p>Los cambios de esta sesión no se guardan ni se envían a otras personas.</p><label>XP de prueba <input id="qaXP" type="number" min="0" max="1000000" value="${state.profile.xp}"></label><button class="btn-v3 soft" data-action="qa-xp">Aplicar XP</button><label>Presencia simulada<select id="qaPresence"><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option></select></label><button class="btn-v3 soft" data-action="qa-presence">Aplicar estado</button><div class="hero-buttons"><button class="btn-v3 soft" data-action="qa-chess">Probar ajedrez + Guíame</button><button class="btn-v3 soft" data-action="qa-duo">Probar módulos Duo</button><button class="btn-v3 soft" data-action="avatar-studio">Todos los avatares</button><button class="btn-v3 soft" data-action="qa-reset">Reiniciar prueba</button><button class="btn-v3 primary" data-action="qa-exit">Salir y restaurar</button></div>${sky.qaMarkup()}${planetMap()}`:`<p>Inicia sesión con tu cuenta autorizada de Supabase Auth.</p><label>Email<input id="qaEmail" type="email" autocomplete="username"></label><label>Contraseña<input id="qaPassword" type="password" autocomplete="current-password"></label><button class="btn-v3 primary" data-action="qa-login">Entrar en QA</button><p id="qaStatus" role="status"></p>`}</section>`,{world:'home',back:{action:'settings',label:'Preferencias'}})
+  app.innerHTML=shell(`<section class="preferences"><small>QA / ADMIN</small><h1>${QA.active?'Laboratorio de prueba':'Acceso al laboratorio'}</h1>${QA.active?`<p>Los cambios de esta sesión no se guardan ni se envían a otras personas.</p><label>XP de prueba <input id="qaXP" type="number" min="0" max="1000000" value="${state.profile.xp}"></label><button class="btn-v3 soft" data-action="qa-xp">Aplicar XP</button><label>Presencia simulada<select id="qaPresence"><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option></select></label><button class="btn-v3 soft" data-action="qa-presence">Aplicar estado</button><div class="hero-buttons"><button class="btn-v3 soft" data-action="qa-chess">Probar ajedrez + Guíame</button><button class="btn-v3 soft" data-action="qa-duo">Probar módulos Duo</button><button class="btn-v3 soft" data-action="avatar-studio">Todos los avatares</button><button class="btn-v3 soft" data-action="qa-reset">Reiniciar prueba</button><button class="btn-v3 primary" data-action="qa-exit">Salir y restaurar</button></div>${socialQAMarkup()}${sky.qaMarkup()}${planetMap()}`:`<p>Inicia sesión con tu cuenta autorizada de Supabase Auth.</p><label>Email<input id="qaEmail" type="email" autocomplete="username"></label><label>Contraseña<input id="qaPassword" type="password" autocomplete="current-password"></label><button class="btn-v3 primary" data-action="qa-login">Entrar en QA</button><p id="qaStatus" role="status"></p>`}</section>`,{world:'home',back:{action:'settings',label:'Preferencias'}})
 }
 async function loginQA(){
   const status=document.querySelector('#qaStatus');if(!supabase){status.textContent='Supabase no está configurado.';return}
@@ -1121,12 +1143,12 @@ async function loginQA(){
   if(state.social.channel)await supabase.removeChannel(state.social.channel)
   if(state.signalChannel)await supabase.removeChannel(state.signalChannel)
   clearInterval(socialHeartbeat)
-  QA.original=structuredClone(state.profile);QA.duo=structuredClone(state.duoStats);QA.social=state.social;QA.room=state.room;QA.active=true
+  typingPulse.stop();clearPhotoDraft();signalAudio.hush();QA.notificationSound=state.notificationSound;QA.original=structuredClone(state.profile);QA.duo=structuredClone(state.duoStats);QA.social=state.social;QA.room=state.room;QA.active=true
   state.profile={...state.profile,xp:50000};state.social={messages:[],presence:{},open:false,loaded:true,unread:0};QA.stars=[{event_key:'qa',label:'Una estrella de prueba',icon:'✦',created_at:new Date().toISOString()}];QA.presence={player_key:otherDefault(),status:'online',current_world:'refuge'};renderQA()
 }
 async function exitQA(){
   if(!QA.active)return
-  state.profile=QA.original;state.duoStats=QA.duo;state.room=QA.room;state.social={...QA.social,channel:null,presence:{},fallback:[],connected:false};QA.active=false
+  typingPulse.stop();clearPhotoDraft();state.notificationSound=QA.notificationSound;state.profile=QA.original;state.duoStats=QA.duo;state.room=QA.room;state.social={...QA.social,channel:null,presence:{},fallback:[],connected:false};QA.active=false
   sky.restoreQA()
   await supabase.auth.signOut();await setupSignalChannel();await setupSocialLayer();renderHome()
 }
@@ -1142,6 +1164,16 @@ clickChessSquare=function(square){if(!QA.active)return originalChessClick(square
 app.addEventListener('click',async e=>{
   const el=e.target.closest('[data-action]');if(!el)return
   const a=el.dataset.action
+  if(a==='notification-sound'){state.notificationSound=!state.notificationSound;if(!QA.active)localStorage.setItem(SIGNAL_SOUND_KEY,state.notificationSound?'on':'off');if(!state.notificationSound)signalAudio.hush();return renderSettings()}
+  if(a==='media-signout'){await chatMedia.signOut();refreshSocialDock();return}
+  if(a==='photo-attach'){if(QA.active)return socialPreview('photo');return document.querySelector('#chatPhotoInput')?.click()}
+  if(a==='photo-cancel')return clearPhotoDraft()
+  if(a==='media-gallery'){const list=document.querySelector('#socialMessages');list?.classList.toggle('social-gallery');el.setAttribute('aria-pressed',String(list?.classList.contains('social-gallery')));return}
+  if(a==='share-quote'){const source=el.dataset.source,body=source==='garden'?document.querySelector('#gardenQuote')?.textContent:document.querySelector('.library-card h1')?.textContent;if(body)return sendChatMessage(body,'quote',{source});return}
+  if(a==='open-photo'){if(QA.active)return openPhotoLightbox('/avatars/cow-galaxy.svg','Foto simulada de QA');const message=state.social.messages.find(m=>String(m.client_id||m.id)===el.dataset.id);if(message)try{await chatMedia.open(message)}catch(e){toast(e.message)}return}
+  if(a==='join-invite')return enterInvitation(el.dataset.code,el.dataset.game,el.dataset.id)
+  if(a==='new-invite')return quickGameInvite(el.dataset.game||'trivia')
+  if(a==='qa-social'&&QA.active)return socialPreview(el.dataset.preview)
   if(a==='world-menu'){const nav=document.querySelector('.topnav');nav.classList.toggle('expanded');el.setAttribute('aria-expanded',String(nav.classList.contains('expanded')));return}
   if(a==='coffee-accept'){const ok=await sendChatMessage(word('Sí, vamos por ese café ☕','Yes, let’s have that coffee ☕'),'coffee_reply',{reply_to:el.dataset.id});if(ok)recordStar('coffee-accepted','Un café compartido','☕');return}
   if(a==='planet')return travelTo(el.dataset.planet)
@@ -1168,12 +1200,13 @@ document.addEventListener('input',e=>{
   if(e.target.id==='ambientVolume')ambient.setVolume(Number(e.target.value)/100)
   if(e.target.id==='visualQuality'){document.documentElement.dataset.quality=e.target.value;localStorage.setItem('koraverse_v5_quality',e.target.value)}
 })
-document.addEventListener('pointerdown',()=>{lastInteraction=Date.now();ambient.activate().catch(()=>{})},{passive:true})
+document.addEventListener('pointerdown',()=>{lastInteraction=Date.now();if(!QA.active&&state.sound&&state.notificationSound&&!state.discreet)signalAudio.activate();ambient.activate().catch(()=>{})},{passive:true})
 document.addEventListener('keydown',()=>{lastInteraction=Date.now()})
 let pauseStarted=null
-document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));if(document.hidden){pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true)}updatePresence()})
+document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));if(document.hidden){typingPulse.stop();pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true)}updatePresence()})
 window.addEventListener('online',()=>{if(state.profile&&!QA.active)setupSocialLayer()})
 window.addEventListener('pagehide',()=>state.social.channel?.untrack())
 
 const sky=createLivingSky({app,state,QA,supabase,shell,ambient,avatarVisual,renderHome,renderBaseHome:renderUniverseHome,travel:travelTo,toast,localStars,partnerPresence,clearTimers,url:SUPABASE_URL,key:SUPABASE_KEY,coffee:()=>coffeeBreak(),joinRoom:code=>connectRoom('guest',code)})
+navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type!=='OPEN_SIGNALS')return;const data=event.data;if(!state.profile){history.replaceState({},'',roomLink(data.room_code,data.game,location.pathname)||location.pathname+'?signals=1');return}if(roomCode(data.room_code))enterInvitation(data.room_code,data.game);else{state.social.open=false;toggleChat()}})
 sky.start(init)
