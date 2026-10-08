@@ -28,7 +28,7 @@ No se cambió texto, typing, sonido, frases, Duo, trivia, Santuario ni sus datos
 
 ## Pruebas y comprobación real
 
-`npm test`: **58/58** aprobadas. `npm run build`: aprobado. Pruebas del cliente y handlers reales con adaptador Storage: Carlos → Kora, Kora → Carlos, nueva instancia tras recarga, caché, metadata, limpieza, rechazo de rutas/perfiles/orígenes, archivos grandes/falsos, bucket público y tickets inválidos/expirados. Se escanea el bundle de producción para descartar la variable y un secreto de prueba inyectado solo en el entorno servidor durante la compilación.
+`npm test`: **59/59** aprobadas. `npm run build`: aprobado. Pruebas del cliente y handlers reales con adaptador Storage: Carlos → Kora, Kora → Carlos, nueva instancia tras recarga, caché, metadata, limpieza, rechazo de rutas/perfiles/orígenes, archivos grandes/falsos, bucket público y tickets inválidos/expirados. Se escanea el bundle de producción para descartar la variable y un secreto de prueba inyectado solo en el entorno servidor durante la compilación.
 
 Después de desplegar, abrir dos navegadores con perfiles distintos. Enviar una foto en cada sentido, esperar recepción automática, recargar ambos, abrir miniatura/archivo completo y revisar en Supabase que el bucket continúe privado. También rechazar un archivo demasiado grande y comprobar que no aparece ningún login de fotos. Sin credenciales remotas conectadas, esta ejecución valida el recorrido local con Storage simulado; no afirma una subida real a tu proyecto.
 

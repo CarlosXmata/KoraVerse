@@ -23,6 +23,16 @@ test('incoming sounds respect every mute rule, own messages and duplicates',()=>
  const base={from:'kora',me:'carlos'};assert.equal(shouldSound(base),true)
  for(const extra of [{from:'carlos'},{duplicate:true},{qa:true},{sound:false},{notificationSound:false},{discreet:true},{quiet:true}])assert.equal(shouldSound({...base,...extra}),false)
 })
+test('default typing timers keep the browser global receiver on input, stop and expiry',()=>{
+ const originalSchedule=globalThis.setTimeout,originalCancel=globalThis.clearTimeout,events=[];let pending,cancelCalls=0
+ try{
+  globalThis.setTimeout=function(fn){assert.equal(this,globalThis,'Window.setTimeout received the wrong this');pending=fn;return 123}
+  globalThis.clearTimeout=function(){assert.equal(this,globalThis,'Window.clearTimeout received the wrong this');cancelCalls++}
+  const pulse=new TypingPulse(active=>events.push(active))
+  pulse.stop();pulse.input();pulse.stop();pulse.input();pending();pulse.stop()
+  assert.deepEqual(events,[true,false,true,false]);assert.ok(cancelCalls>=5)
+ }finally{globalThis.setTimeout=originalSchedule;globalThis.clearTimeout=originalCancel}
+})
 test('generative signal audio reuses its context, differentiates kinds and softens open-chat volume',async()=>{
  const saved=globalThis.window;let created=0,frequencies=[],peaks=[]
  class Context{constructor(){created++;this.state='running';this.currentTime=0;this.destination={}}resume(){return Promise.resolve()}createOscillator(){return {frequency:{set value(v){frequencies.push(v)}},connect(){},start(){},stop(){},disconnect(){}}}createGain(){return {gain:{setValueAtTime(){},linearRampToValueAtTime:v=>peaks.push(v),exponentialRampToValueAtTime(){}},connect(){},disconnect(){}}}}

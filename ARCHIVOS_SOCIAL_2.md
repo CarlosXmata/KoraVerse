@@ -24,6 +24,7 @@ Comparación con el KORAVERSE 5.1 anterior: 98 archivos originales, ninguno elim
 - api/chat-media-upload.js
 - api/chat-push.js
 - api/sanctuary-mode.js
+- FIX_ILLEGAL_INVOCATION.md
 - FOTOS_SIN_LOGIN.md
 - lib/chat-media-server.js
 - README_SOCIAL_2.md
@@ -58,5 +59,6 @@ Comparación con el KORAVERSE 5.1 anterior: 98 archivos originales, ninguno elim
 - validation/social2/prepared-photo-desktop.jpg
 - validation/social2/solo-result-20.jpg
 - validation/social2/synthetic-photo.jpg
+- validation/social2/timer-browser-check.jpg
 
 Los archivos de narrativa/Atlas/Yearbook y las migraciones anteriores se conservan byte por byte. El cambio de api/sanctuary.js es únicamente el bloqueo temporal por mantenimiento para convertir el diario.

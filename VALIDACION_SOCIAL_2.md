@@ -8,9 +8,9 @@ Se eliminó la sesión Auth de fotos. Las tres APIs del servidor se prueban con 
 
 ## Resultado local
 
-**npm test: 58 pruebas, 58 aprobadas, 0 fallos. npm run build: aprobado.** Logs íntegros en `validation/social2/npm-test.log` y `npm-build.log`.
+**npm test: 59 pruebas, 59 aprobadas, 0 fallos. npm run build: aprobado.** Logs íntegros en `validation/social2/npm-test.log` y `npm-build.log`.
 
-Build: Vite 7.3.6, 77 módulos; JS principal 494.36 kB (153.42 kB gzip), CSS 125.98 kB (28.11 kB gzip). Node de validación: 24.19.0. Se usó npm mediante el runtime disponible; los comandos ejecutados son los definidos en package.json. No se incluyen node_modules, dist ni secretos en el ZIP.
+Build: Vite 7.3.6, 77 módulos; JS principal 494.40 kB (153.45 kB gzip), CSS 125.98 kB (28.11 kB gzip). Node de validación: 24.19.0. Se usó npm mediante el runtime disponible; los comandos ejecutados son los definidos en package.json. No se incluyen node_modules, dist ni secretos en el ZIP.
 
 ## Cobertura comprobada
 
