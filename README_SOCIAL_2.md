@@ -73,3 +73,7 @@ Durante `npm run dev`, `/social-preview.html` permite revisar renderers, visor y
 Para revertir solo Signals, redesplegar el ZIP anterior; no borrar bucket, mensajes, miembros ni imágenes. Las tablas nuevas pueden permanecer. Los clientes anteriores mostrarán los nuevos mensajes mediante su renderer anterior con menor detalle. Revertir el PIN requiere el procedimiento independiente de SANCTUARY_PIN_4_SETUP.md.
 
 Las decisiones de Storage siguen las guías oficiales de [control de acceso](https://supabase.com/docs/guides/storage/security/access-control) y [URL firmadas](https://supabase.com/docs/reference/javascript/storage-from-createsignedurl).
+# Actualización: el color de cada órbita
+
+Esta entrega añade el modo gris después de cinco días de ausencia, recuperación al ganar EXP y controles de simulación por perfil en el Santuario. Antes de desplegar, consulta `MODO_GRIS.md` y aplica `supabase/migration_color_rest.sql`. La validación final de esta entrega es de 63 pruebas aprobadas y build aprobado; los recuentos posteriores de este documento corresponden a entregas anteriores.
+

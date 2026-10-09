@@ -14,6 +14,15 @@ function fakeDB({user=owner,limited=false,fail=false,state={id:1,status:'normal'
  return db
 }
 const request=(body,extra={})=>({method:'POST',headers:{origin,'sec-fetch-site':'same-origin',authorization:'Bearer test'},body,...extra})
+
+test('gray preview validates profile and boolean behind an active Sanctuary session',async()=>{
+ const db=fakeDB(),session=issueSession(env,1000000),calls=[];db.tables.koraverse_sanctuary_sessions.push({id:session.claims.id,owner,expires_at:new Date(session.claims.exp*1000).toISOString()});db.rpc=async(name,args)=>{calls.push({name,args});return {data:{player_key:args.p_player,forced_gray:args.p_enabled},error:null}}
+ const headers={origin,'sec-fetch-site':'same-origin',cookie:`${COOKIE}=${session.token}`},handler=createSanctuaryHandler({env,db,now:()=>1000100})
+ for(const body of [{player:'admin',enabled:true},{player:'kora',enabled:'true'},{player:'Carlos',enabled:true}]){const res=response();await handler(request(body,{headers,query:{resource:'color-rest'}}),res);assert.equal(res.code,400)}
+ assert.equal(calls.length,0)
+ for(const player of ['carlos','kora'])for(const enabled of [true,false]){const res=response();await handler(request({player,enabled},{headers,query:{resource:'color-rest'}}),res);assert.equal(res.code,200);assert.deepEqual(calls.at(-1),{name:'koraverse_color_preview',args:{p_player:player,p_enabled:enabled}})}
+ const res=response();await createSanctuaryHandler({env,db,now:()=>2200000})(request({player:'kora',enabled:true},{headers,query:{resource:'color-rest'}}),res);assert.equal(res.code,401);assert.equal(calls.length,4)
+})
 test('unlock requires the owner Auth user, valid private key, rate allowance and same origin',async()=>{
  for(const [options,body,code] of [[{user:'someone-else'},{pin},401],[{}, {pin:'wrong-key'},401],[{limited:true},{pin},429],[{fail:true},{pin},503],[{}, {pin},200]]){
   const db=fakeDB(options),res=response();await createUnlockHandler({env,db,now:()=>1000000})(request(body),res);assert.equal(res.code,code)
