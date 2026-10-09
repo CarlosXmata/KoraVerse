@@ -1,0 +1,5 @@
+html{transition:filter 1.2s ease}
+html[data-color-gray="true"]{filter:grayscale(1)}
+.color-preview-controls{display:flex;flex-wrap:wrap;gap:.75rem;margin:1rem 0}
+.color-preview-controls button{min-height:44px}
+@media(prefers-reduced-motion:reduce){html{transition:none}}

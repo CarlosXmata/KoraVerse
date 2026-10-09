@@ -1,3 +1,5 @@
+import {ColorRest} from './color-rest.js'
+import './color-rest.css'
 import { createClient } from '@supabase/supabase-js'
 import { Chess } from './chess-engine.js'
 import './style.css'
@@ -105,6 +107,7 @@ const profileKey = name => name.trim().toLowerCase().normalize('NFD').replace(/[
 const otherDefault = () => state.profile?.player_key === 'carlos' ? 'kora' : 'carlos'
 
 const typingPulse=new TypingPulse(active=>sendTyping(active))
+const colorRest=new ColorRest({player:()=>state.profile?.player_key,qa:()=>QA.active,apply:gray=>document.documentElement.dataset.colorGray=String(gray)})
 const chatMedia=new ChatMedia({player:()=>state.profile?.player_key,qa:()=>QA.active})
 let inviteBusy=false,photoDraft=null,photoBusy=false,photoPreviewUrl=null,resonanceTimer=null
 const inviteStatuses=new Map()
@@ -318,7 +321,7 @@ async function setupSocialLayer(){
   await loadChatMessages(true)
   socialHeartbeat=setInterval(async()=>{
     if(!state.profile||QA.active||document.hidden)return
-    await updatePresence(state.currentWorld||state.screen)
+    await colorRest.sync();await updatePresence(state.currentWorld||state.screen)
     await loadChatMessages(true)
     if(state.dbReady){const {data}=await supabase.from('koraverse_presence').select('*').gt('last_seen',new Date(Date.now()-65000).toISOString());state.social.fallback=data||[];refreshSocialDock()}
   },25000)
@@ -389,7 +392,7 @@ async function init(){
   const saved=localStorage.getItem(PROFILE_KEY)
   if(saved){ try{ state.profile=JSON.parse(saved) }catch{} }
   if(state.profile){
-    await hydrateProfile(); await loadStars(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
+    await hydrateProfile(); await colorRest.sync(); await loadStars(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
     const deep=parseDuoLink(location.search),queryRoom=deep.code
     let savedRoom=null;try{savedRoom=JSON.parse(localStorage.getItem(ROOM_KEY)||'null')}catch{}
     if(queryRoom?.length===6){
@@ -467,6 +470,7 @@ async function awardXP(amount,category='general',source='activity',{duo=false,si
   const field={english:'english_xp',puzzle:'puzzle_xp',arcade:'arcade_xp',trivia:'trivia_xp',duo:'duo_xp'}[category]
   if(field) state.profile[field]=(state.profile[field]||0)+amount
   await persistProfile()
+  await colorRest.sync(true)
   state.activity.unshift({category,source,xp:amount,created_at:new Date().toISOString()})
   if(state.dbReady){
     supabase.from('koraverse_activity').insert({player_key:state.profile.player_key,category,source,xp:amount}).then(()=>{})
@@ -504,7 +508,7 @@ function renderGate(){
 }
 
 async function chooseProfile(name){
-  state.profile=defaultProfile(name); localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile)); await hydrateProfile(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
+  state.profile=defaultProfile(name); localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile)); await hydrateProfile(); await colorRest.sync(); await setupSignalChannel(); await setupSocialLayer(); await checkPendingSignals();
   const deep=parseDuoLink(location.search)
   if(deep.code)return enterInvitation(deep.code,deep.game)
   if(deep.signals){state.social.open=true;state.social.unread=0}
@@ -958,7 +962,7 @@ app.addEventListener('click',async e=>{
   if(a==='home')return travelTo('home')
   if(a==='world')return travelTo(el.dataset.world)
   if(a==='profile')return travelTo('profile')
-  if(a==='switch-profile'){if(QA.active)return toast('Sal de QA antes de cambiar de jugador.');typingPulse.stop();clearPhotoDraft();chatMedia.clearCache();clearInterval(socialHeartbeat);if(state.social.channel)await supabase?.removeChannel(state.social.channel);await leaveRoom(false);state.social={channel:null,presence:{},messages:[],open:false,loaded:false,unread:0,typing:null};if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
+  if(a==='switch-profile'){if(QA.active)return toast('Sal de QA antes de cambiar de jugador.');typingPulse.stop();clearPhotoDraft();chatMedia.clearCache();colorRest.clear();clearInterval(socialHeartbeat);if(state.social.channel)await supabase?.removeChannel(state.social.channel);await leaveRoom(false);state.social={channel:null,presence:{},messages:[],open:false,loaded:false,unread:0,typing:null};if(state.social.channel&&supabase)supabase.removeChannel(state.social.channel);if(state.signalChannel&&supabase)supabase.removeChannel(state.signalChannel);localStorage.removeItem(PROFILE_KEY);state.profile=null;return renderGate()}
   if(a==='sound'){state.sound=!state.sound;localStorage.setItem(SOUND_KEY,state.sound?'on':'off');toast(state.sound?'Sonido activado':'Sonido desactivado');return state.screen==='home'?renderHome():null}
   if(a==='language'){state.lang=state.lang==='es'?'en':'es';localStorage.setItem(LANG_KEY,state.lang);if(state.profile){state.profile.language=state.lang;await persistProfile(false)}return rerenderPrimary()}
   if(a==='theme'){const id=el.dataset.theme;if(!THEME_IDS.includes(id))return;state.theme=id;localStorage.setItem(THEME_KEY,id);if(state.profile){state.profile.theme_id=id;await persistProfile(false)}applyTheme();return renderProfile()}
@@ -1143,14 +1147,14 @@ async function loginQA(){
   if(state.social.channel)await supabase.removeChannel(state.social.channel)
   if(state.signalChannel)await supabase.removeChannel(state.signalChannel)
   clearInterval(socialHeartbeat)
-  typingPulse.stop();clearPhotoDraft();signalAudio.hush();QA.notificationSound=state.notificationSound;QA.original=structuredClone(state.profile);QA.duo=structuredClone(state.duoStats);QA.social=state.social;QA.room=state.room;QA.active=true
+  typingPulse.stop();clearPhotoDraft();signalAudio.hush();colorRest.clear();QA.notificationSound=state.notificationSound;QA.original=structuredClone(state.profile);QA.duo=structuredClone(state.duoStats);QA.social=state.social;QA.room=state.room;QA.active=true
   state.profile={...state.profile,xp:50000};state.social={messages:[],presence:{},open:false,loaded:true,unread:0};QA.stars=[{event_key:'qa',label:'Una estrella de prueba',icon:'✦',created_at:new Date().toISOString()}];QA.presence={player_key:otherDefault(),status:'online',current_world:'refuge'};renderQA()
 }
 async function exitQA(){
   if(!QA.active)return
   typingPulse.stop();clearPhotoDraft();state.notificationSound=QA.notificationSound;state.profile=QA.original;state.duoStats=QA.duo;state.room=QA.room;state.social={...QA.social,channel:null,presence:{},fallback:[],connected:false};QA.active=false
   sky.restoreQA()
-  await supabase.auth.signOut();await setupSignalChannel();await setupSocialLayer();renderHome()
+  await supabase.auth.signOut();await colorRest.sync();await setupSignalChannel();await setupSocialLayer();renderHome()
 }
 function qaDuo(mode='chess'){
   state.room={code:'QA',role:'host',channel:null,connected:false,players:[{player_key:state.profile.player_key,name:state.profile.display_name,role:'host'},{player_key:otherDefault(),name:partnerLabel(),role:'guest'}],game:freshDuoGame()}
@@ -1202,10 +1206,10 @@ document.addEventListener('input',e=>{
 document.addEventListener('pointerdown',()=>{lastInteraction=Date.now();if(!QA.active&&state.sound&&state.notificationSound&&!state.discreet)signalAudio.activate();ambient.activate().catch(()=>{})},{passive:true})
 document.addEventListener('keydown',()=>{lastInteraction=Date.now()})
 let pauseStarted=null
-document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));if(document.hidden){typingPulse.stop();pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true)}updatePresence()})
+document.addEventListener('visibilitychange',()=>{document.documentElement.dataset.paused=String((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));ambient.pause((document.hidden||state.discreet||['paused','maintenance'].includes(document.documentElement.dataset.universeStatus)));if(document.hidden){typingPulse.stop();pauseStarted=Date.now()}else if(pauseStarted){const delta=Date.now()-pauseStarted;if(state.invaders?.end)state.invaders.end+=delta;if(state.chaos?.end)state.chaos.end+=delta;pauseStarted=null}if(!document.hidden){lastInteraction=Date.now();loadChatMessages(true);colorRest.sync()}updatePresence()})
 window.addEventListener('online',()=>{if(state.profile&&!QA.active)setupSocialLayer()})
 window.addEventListener('pagehide',()=>state.social.channel?.untrack())
 
-const sky=createLivingSky({app,state,QA,supabase,shell,ambient,avatarVisual,renderHome,renderBaseHome:renderUniverseHome,travel:travelTo,toast,localStars,partnerPresence,clearTimers,url:SUPABASE_URL,key:SUPABASE_KEY,coffee:()=>coffeeBreak(),joinRoom:code=>connectRoom('guest',code)})
+const sky=createLivingSky({colorChanged:()=>colorRest.sync(),app,state,QA,supabase,shell,ambient,avatarVisual,renderHome,renderBaseHome:renderUniverseHome,travel:travelTo,toast,localStars,partnerPresence,clearTimers,url:SUPABASE_URL,key:SUPABASE_KEY,coffee:()=>coffeeBreak(),joinRoom:code=>connectRoom('guest',code)})
 navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type!=='OPEN_SIGNALS')return;const data=event.data;if(!state.profile){history.replaceState({},'',roomLink(data.room_code,data.game,location.pathname)||location.pathname+'?signals=1');return}if(roomCode(data.room_code))enterInvitation(data.room_code,data.game);else{state.social.open=false;toggleChat()}})
 sky.start(init)

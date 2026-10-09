@@ -14,6 +14,12 @@ export function createSanctuaryHandler({env=process.env,db=serverDB(env),now=()=
   const active=await db.from('koraverse_sanctuary_sessions').select('id').eq('id',session.id).eq('owner',session.owner).gt('expires_at',new Date(now()).toISOString()).maybeSingle()
   if(active.error||!active.data)return apiFailure(res,401)
   const resource=req.query?.resource||'entries'
+  if(resource==='color-rest'){
+   if(req.method==='GET'){const result=await db.from('koraverse_color_rest').select('*').order('player_key');if(result.error)return apiFailure(res);return res.status(200).json({profiles:result.data})}
+   if(req.method!=='POST'||!['carlos','kora'].includes(req.body?.player)||typeof req.body?.enabled!=='boolean')return res.status(400).json({error:'Invalid preview'})
+   const result=await db.rpc('koraverse_color_preview',{p_player:req.body.player,p_enabled:req.body.enabled});if(result.error)return apiFailure(res)
+   return res.status(200).json({color:result.data})
+  }
   if(resource==='session'){
    if(req.method==='DELETE'){await db.from('koraverse_sanctuary_sessions').delete().eq('id',session.id);res.setHeader('Set-Cookie',cookieHeader('',true));return res.status(200).json({ok:true})}
    if(req.method==='GET')return res.status(200).json({owner:session.owner,expires_at:session.exp*1000})

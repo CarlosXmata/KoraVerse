@@ -22,6 +22,11 @@ export function createSkyHandler({db=serverDB(),now=()=>new Date()}={}){return a
  try{
   const snapshot=await db.from('koraverse_universe_state').select('*').eq('id',1).single()
   if(snapshot.error)return apiFailure(res)
+  if(req.method==='POST'&&['color-touch','color-awake'].includes(req.body?.action)){
+   const result=await db.rpc('koraverse_color_touch',{p_player:player,p_awake:req.body.action==='color-awake'})
+   if(result.error)return apiFailure(res)
+   return res.status(200).json({color:result.data})
+  }
   if(req.method==='GET'){
    const [stars,events,definitions]=await Promise.all([
     db.from('koraverse_stars').select('*').in('visibility',['shared','public']).order('event_date'),
